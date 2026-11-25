@@ -1,4 +1,5 @@
-//! Settings: appearance, 3D scene, agents, data & keys, risk, general.
+//! Settings: appearance (with an "Advanced" fold), agents, data & keys, risk,
+//! about. The essentials fit on one screen.
 
 use bevy_egui::egui::{self, RichText};
 use merces_agents::Lang;
@@ -6,7 +7,7 @@ use merces_core::{AgentId, Effort};
 
 use super::{SettingsTab, UiState, agent_name, t};
 use crate::bridge::Bridge;
-use crate::config::{self, AppConfig, Density, FontChoice, Secrets, ThemeMode, ViewMode};
+use crate::config::{self, AppConfig, FontChoice, Quality, Secrets, ThemeMode};
 use crate::theme::{self, Theme};
 
 const MODELS: [&str; 4] = [
@@ -70,42 +71,51 @@ pub fn window(
     let mut open = st.settings;
     egui::Window::new(t(lang, "Réglages", "Settings"))
         .open(&mut open)
-        .default_width(640.0)
+        .default_width(600.0)
+        .resizable(false)
         .default_pos(egui::pos2(300.0, 90.0))
         .show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (tab, label) in [
                     (SettingsTab::Appearance, t(lang, "Apparence", "Appearance")),
-                    (SettingsTab::Scene, t(lang, "Scène 3D", "3D scene")),
                     (SettingsTab::Agents, t(lang, "Agents", "Agents")),
                     (SettingsTab::Data, t(lang, "Données", "Data")),
                     (SettingsTab::Risk, t(lang, "Risque", "Risk")),
-                    (SettingsTab::General, t(lang, "Général", "General")),
+                    (SettingsTab::About, t(lang, "À propos", "About")),
                 ] {
                     ui.selectable_value(&mut st.settings_tab, tab, label);
                 }
             });
             ui.separator();
-            egui::ScrollArea::vertical()
-                .max_height(520.0)
-                .show(ui, |ui| match st.settings_tab {
-                    SettingsTab::Appearance => appearance(ui, th, cfg, lang),
-                    SettingsTab::Scene => scene(ui, th, cfg, lang),
-                    SettingsTab::Agents => agents(ui, th, cfg, lang),
-                    SettingsTab::Data => data(ui, th, cfg, secrets, st, bridge, lang),
-                    SettingsTab::Risk => risk(ui, th, cfg, lang),
-                    SettingsTab::General => general(ui, th, cfg, lang),
-                });
+            // The short tabs fit as they are; the long ones scroll on small screens.
+            let room = (ctx.viewport_rect().height() - 220.0).max(240.0);
+            match st.settings_tab {
+                SettingsTab::Appearance => appearance(ui, th, cfg, lang),
+                SettingsTab::Risk => risk(ui, th, cfg, lang),
+                SettingsTab::About => about(ui, th, lang),
+                SettingsTab::Agents => {
+                    egui::ScrollArea::vertical()
+                        .max_height(room)
+                        .min_scrolled_height(room.min(420.0))
+                        .show(ui, |ui| agents(ui, th, cfg, lang));
+                }
+                SettingsTab::Data => {
+                    egui::ScrollArea::vertical()
+                        .max_height(room)
+                        .min_scrolled_height(room.min(420.0))
+                        .show(ui, |ui| data(ui, th, cfg, secrets, st, bridge, lang));
+                }
+            }
         });
     st.settings = open;
 }
 
 fn appearance(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
-    let a = &mut cfg.appearance;
     egui::Grid::new("appearance")
         .num_columns(2)
         .spacing([24.0, 12.0])
         .show(ui, |ui| {
+            let a = &mut cfg.appearance;
             row(ui, th, t(lang, "Thème", "Theme"));
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut a.theme, ThemeMode::Dark, t(lang, "Sombre", "Dark"));
@@ -129,12 +139,8 @@ fn appearance(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
             });
             ui.end_row();
 
-            row(ui, th, t(lang, "Police du texte", "Text font"));
+            row(ui, th, t(lang, "Police", "Font"));
             font_picker(ui, "ui-font", &mut a.ui_font, lang);
-            ui.end_row();
-
-            row(ui, th, t(lang, "Police des titres", "Title font"));
-            font_picker(ui, "title-font", &mut a.title_font, lang);
             ui.end_row();
 
             row(ui, th, t(lang, "Taille du texte", "Text size"));
@@ -151,64 +157,44 @@ fn appearance(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
             }
             ui.end_row();
 
-            row(ui, th, t(lang, "Densité", "Density"));
+            row(ui, th, t(lang, "Qualité 3D", "3D quality"));
             ui.horizontal(|ui| {
-                ui.selectable_value(
-                    &mut a.density,
-                    Density::Compact,
-                    t(lang, "Compacte", "Compact"),
-                );
-                ui.selectable_value(
-                    &mut a.density,
-                    Density::Comfortable,
-                    t(lang, "Confortable", "Comfortable"),
-                );
-                ui.selectable_value(
-                    &mut a.density,
-                    Density::Spacious,
-                    t(lang, "Aérée", "Spacious"),
-                );
+                let q = &mut cfg.scene.quality;
+                ui.selectable_value(q, Quality::Low, t(lang, "Basse", "Low"))
+                    .on_hover_text(t(
+                        lang,
+                        "Sans anticrénelage ni lueur, moins d'étoiles : pour les GPU intégrés sur batterie.",
+                        "No anti-aliasing or glow, fewer stars: for integrated GPUs on battery.",
+                    ));
+                ui.selectable_value(q, Quality::Medium, t(lang, "Moyenne", "Medium"));
+                ui.selectable_value(q, Quality::High, t(lang, "Haute", "High"));
+            });
+            ui.end_row();
+
+            row(ui, th, t(lang, "Langue", "Language"));
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut cfg.engine.lang, Lang::Fr, "Français");
+                ui.selectable_value(&mut cfg.engine.lang, Lang::En, "English");
             });
             ui.end_row();
         });
     ui.add_space(8.0);
-    ui.label(
-        RichText::new(t(
-            lang,
-            "Thème Helix : palette des projets org-helix (encre, ambre pâle, rouge), titres Bricolage Grotesque, texte Geist.",
-            "Helix theme: the org-helix palette (ink, pale amber, red), Bricolage Grotesque titles, Geist text.",
-        ))
-        .size(12.0 * th.scale)
-        .color(th.pal.muted),
-    );
+    egui::CollapsingHeader::new(t(lang, "Avancé", "Advanced"))
+        .id_salt("advanced")
+        .default_open(false)
+        .show(ui, |ui| advanced(ui, th, cfg, lang));
 }
 
-fn scene(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
-    let s = &mut cfg.scene;
-    egui::Grid::new("scene")
+fn advanced(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
+    egui::Grid::new("advanced-grid")
         .num_columns(2)
         .spacing([24.0, 12.0])
         .show(ui, |ui| {
-            row(ui, th, t(lang, "Vue", "View"));
-            ui.horizontal(|ui| {
-                ui.selectable_value(
-                    &mut s.view,
-                    ViewMode::Solar,
-                    t(lang, "Système solaire", "Solar system"),
-                );
-                ui.selectable_value(&mut s.view, ViewMode::Graph, t(lang, "Graphe", "Graph"));
-            });
+            row(ui, th, t(lang, "Police des titres", "Title font"));
+            font_picker(ui, "title-font", &mut cfg.appearance.title_font, lang);
             ui.end_row();
-            row(ui, th, t(lang, "Lueur (bloom)", "Glow (bloom)"));
-            ui.checkbox(&mut s.bloom, "");
-            ui.end_row();
-            row(
-                ui,
-                th,
-                t(lang, "Anticrénelage (MSAA 4×)", "Anti-aliasing (MSAA 4×)"),
-            );
-            ui.checkbox(&mut s.msaa, "");
-            ui.end_row();
+
+            let s = &mut cfg.scene;
             row(
                 ui,
                 th,
@@ -216,25 +202,32 @@ fn scene(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
             );
             ui.horizontal(|ui| {
                 for (v, label) in [
+                    (0, t(lang, "Écran", "Display")),
                     (30, "30"),
                     (60, "60"),
                     (120, "120"),
-                    (144, "144"),
-                    (0, "Auto"),
                 ] {
                     ui.selectable_value(&mut s.fps_cap, v, label);
                 }
             });
             ui.end_row();
-            row(ui, th, t(lang, "Vitesse des orbites", "Orbit speed"));
-            ui.add(egui::Slider::new(&mut s.orbit_speed, 0.0..=3.0).step_by(0.1));
+
+            row(ui, th, t(lang, "Rythme des orbites", "Orbit pace"));
+            ui.add(
+                egui::Slider::new(&mut s.time_scale, 0.25..=3.0)
+                    .step_by(0.25)
+                    .suffix(" ×"),
+            );
             ui.end_row();
-            row(ui, th, t(lang, "Étoiles", "Stars"));
-            ui.add(egui::Slider::new(&mut s.stars, 0..=3000).step_by(100.0));
+
+            row(ui, th, t(lang, "Mouvement réduit", "Reduced motion"));
+            ui.checkbox(&mut s.reduced_motion, "").on_hover_text(t(
+                lang,
+                "Fige les orbites et ne garde que les animations essentielles.",
+                "Freezes the orbits and keeps only the essential animations.",
+            ));
             ui.end_row();
-            row(ui, th, t(lang, "Étiquettes des planètes", "Planet labels"));
-            ui.checkbox(&mut s.labels, "");
-            ui.end_row();
+
             row(
                 ui,
                 th,
@@ -245,9 +238,6 @@ fn scene(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
                 ),
             );
             ui.checkbox(&mut s.eco_unfocused, "");
-            ui.end_row();
-            row(ui, th, t(lang, "Mouvement réduit", "Reduced motion"));
-            ui.checkbox(&mut s.reduced_motion, "");
             ui.end_row();
         });
 }
@@ -273,48 +263,53 @@ fn agents(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
         ui.add(egui::DragValue::new(&mut e.research_searches).range(1..=20));
     });
     ui.add_space(6.0);
-    for agent in AgentId::ALL {
-        let mut s = e.agent(agent);
-        theme::card(th).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(theme::title(th, agent_name(agent, lang), 16.0));
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(t(lang, "Modèle", "Model")).color(th.pal.muted));
+    egui::Grid::new("agents-grid")
+        .num_columns(3)
+        .spacing([16.0, 8.0])
+        .show(ui, |ui| {
+            for agent in AgentId::ALL {
+                let mut s = e.agent(agent);
+                ui.label(RichText::new(agent_name(agent, lang)).color(th.pal.text));
                 egui::ComboBox::from_id_salt(("model", agent))
                     .selected_text(&s.model)
-                    .width(190.0)
+                    .width(180.0)
                     .show_ui(ui, |ui| {
                         for m in MODELS {
                             ui.selectable_value(&mut s.model, m.to_owned(), m);
                         }
                     });
-                ui.label(RichText::new(t(lang, "Effort", "Effort")).color(th.pal.muted));
                 egui::ComboBox::from_id_salt(("effort", agent))
                     .selected_text(s.effort.as_str())
+                    .width(90.0)
                     .show_ui(ui, |ui| {
                         for ef in Effort::ALL {
                             ui.selectable_value(&mut s.effort, ef, ef.as_str());
                         }
                     });
-            });
-            ui.label(
-                RichText::new(t(lang, "Consignes supplémentaires", "Extra instructions"))
-                    .color(th.pal.muted),
-            );
-            ui.add(
-                egui::TextEdit::multiline(&mut s.extra_instructions)
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY)
-                    .hint_text(t(
-                        lang,
-                        "Ex. : privilégier les setups de cassure en séance US.",
-                        "E.g. favour breakout setups during the US session.",
-                    )),
-            );
+                ui.end_row();
+                e.agents.insert(agent, s);
+            }
         });
-        e.agents.insert(agent, s);
-        ui.add_space(6.0);
-    }
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new(t(lang, "Consignes supplémentaires", "Extra instructions"))
+        .id_salt("instructions")
+        .show(ui, |ui| {
+            for agent in AgentId::ALL {
+                let mut s = e.agent(agent);
+                ui.label(RichText::new(agent_name(agent, lang)).color(th.pal.muted));
+                ui.add(
+                    egui::TextEdit::multiline(&mut s.extra_instructions)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .hint_text(t(
+                            lang,
+                            "Ex. : privilégier les setups de cassure en séance US.",
+                            "E.g. favour breakout setups during the US session.",
+                        )),
+                );
+                e.agents.insert(agent, s);
+            }
+        });
 }
 
 fn data(
@@ -499,16 +494,15 @@ fn risk(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
     );
 }
 
-fn general(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
-    egui::Grid::new("general")
+fn about(ui: &mut egui::Ui, th: &Theme, lang: Lang) {
+    ui.label(RichText::new(super::overlay::disclaimer(lang)).color(th.pal.text));
+    ui.add_space(8.0);
+    egui::Grid::new("about")
         .num_columns(2)
         .spacing([24.0, 12.0])
         .show(ui, |ui| {
-            row(ui, th, t(lang, "Langue", "Language"));
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut cfg.engine.lang, Lang::Fr, "Français");
-                ui.selectable_value(&mut cfg.engine.lang, Lang::En, "English");
-            });
+            row(ui, th, "Version");
+            ui.label(theme::mono(th, env!("CARGO_PKG_VERSION")));
             ui.end_row();
             row(ui, th, t(lang, "Données", "Data"));
             ui.label(
@@ -526,8 +520,15 @@ fn general(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
                 .size(12.0 * th.scale),
             );
             ui.end_row();
-            row(ui, th, "Version");
-            ui.label(theme::mono(th, env!("CARGO_PKG_VERSION")));
-            ui.end_row();
         });
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new(t(
+            lang,
+            "Thème Helix : palette des projets org-helix (encre, ambre pâle, rouge), titres Bricolage Grotesque, texte Geist (SIL OFL). Personnages et ciel dessinés par le code, originaux (GPL-3.0).",
+            "Helix theme: the org-helix palette (ink, pale amber, red), Bricolage Grotesque titles, Geist text (SIL OFL). Characters and sky drawn in code, original (GPL-3.0).",
+        ))
+        .size(12.0 * th.scale)
+        .color(th.pal.muted),
+    );
 }

@@ -39,6 +39,10 @@ toml = "1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "crypto-rust", "tokio"] }
 rfd = "0.18"
 
+# Rounded corners and border colour of the frameless window on Windows 11.
+[target.'cfg(windows)'.dependencies]
+winit = { version = "0.30", default-features = false }
+
 [features]
 # Faster incremental builds while developing: cargo run --features dev
 dev = ["bevy/dynamic_linking"]

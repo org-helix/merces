@@ -1,5 +1,6 @@
-//! egui interface over the 3D scene: top bar, agent panel, overview card,
-//! symbols, journal, settings and assistant.
+//! egui interface over the 3D scene. At rest: the scene and the top bar (which
+//! is also the title bar). Everything else appears when needed: the agent or
+//! assistant panel on click, the symbols, journal and settings windows, toasts.
 
 mod agent;
 mod assistant;
@@ -9,6 +10,7 @@ mod md;
 mod overlay;
 mod settings;
 mod symbols;
+mod titlebar;
 mod topbar;
 
 use bevy::prelude::*;
@@ -23,6 +25,7 @@ use crate::config::{self, AppConfig, Appearance, Secrets};
 use crate::scene::{Layout, Selection};
 use crate::state::Hub;
 use crate::theme::{self, Theme};
+use crate::window::WindowCtl;
 
 pub struct UiPlugin;
 
@@ -38,19 +41,17 @@ impl Plugin for UiPlugin {
 pub enum SettingsTab {
     #[default]
     Appearance,
-    Scene,
     Agents,
     Data,
     Risk,
-    General,
+    About,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentTab {
+    /// "Live" while an analysis runs, "Today" once it is over.
     #[default]
-    Live,
-    Today,
-    Messages,
+    Now,
     History,
 }
 
@@ -182,6 +183,7 @@ fn ui_main(
     bridge: Res<Bridge>,
     mut secrets: ResMut<Secrets>,
     lay: Res<Layout>,
+    mut win: ResMut<WindowCtl>,
     cams: Query<(&Camera, &GlobalTransform)>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
@@ -205,28 +207,21 @@ fn ui_main(
     );
     let root = &mut root;
 
-    topbar::top(root, th, &mut draft, &mut hub, &mut sel, st, &bridge);
-    topbar::bottom(root, th, &draft, &hub, &bridge);
+    topbar::top(root, th, &mut draft, &mut hub, st, &bridge, &mut win);
 
-    match sel.agent {
+    sel.panel_px = match sel.agent {
         Some(AgentId::Assistant) => {
-            sel.panel_px = assistant::panel(root, th, &draft, &mut hub, &mut sel, st, &bridge);
+            assistant::panel(root, th, &draft, &mut hub, &mut sel, st, &bridge)
         }
-        Some(agent) => {
-            sel.panel_px = agent::panel(root, th, &draft, &hub, &mut sel, st, agent);
-        }
-        None => {
-            sel.panel_px = 0.0;
-            overlay::overview(&ctx, th, &draft, &hub, &mut sel);
-        }
-    }
-    if let Ok((cam, gt)) = cams.single()
-        && draft.scene.labels
-    {
+        Some(agent) => agent::panel(root, th, &draft, &hub, &mut sel, st, agent),
+        None => 0.0,
+    };
+    if let Ok((cam, gt)) = cams.single() {
         overlay::labels(&ctx, th, &draft, &hub, &sel, &lay, cam, gt);
     }
     overlay::toasts(&ctx, th, &hub);
     overlay::proposals(&ctx, th, &mut draft, &mut hub, &bridge);
+    overlay::welcome(&ctx, th, &mut draft);
 
     if st.symbols {
         symbols::window(&ctx, th, &mut draft, &hub, st, &bridge);
@@ -237,6 +232,7 @@ fn ui_main(
     if st.settings {
         settings::window(&ctx, th, &mut draft, &mut secrets, st, &bridge);
     }
+    titlebar::frame(&ctx, th, &mut win);
 
     if draft != *cfg {
         if draft.active_symbol != cfg.active_symbol {
@@ -267,12 +263,4 @@ pub fn meter(ui: &mut egui::Ui, th: &Theme, value: f32, color: egui::Color32, wi
 
 pub fn fmt_usd(v: f64) -> String {
     format!("{v:.2} $")
-}
-
-pub fn fmt_tokens(n: u64) -> String {
-    match n {
-        n if n >= 1_000_000 => format!("{:.1} M", n as f64 / 1e6),
-        n if n >= 1_000 => format!("{:.1} k", n as f64 / 1e3),
-        n => n.to_string(),
-    }
 }

@@ -4426,6 +4426,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "winit",
 ]
 
 [[package]]
