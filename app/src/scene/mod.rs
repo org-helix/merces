@@ -230,7 +230,10 @@ fn render_settings(
     let limiter = if unfocused {
         Limiter::from_framerate(15.0)
     } else if cfg.scene.fps_cap == 0 {
-        Limiter::Auto
+        // Follow the display: vsync alone paces the frames. The pacer's own
+        // "auto" mode added up to one missed vblank per frame (≈55 fps on a
+        // 60 Hz screen, measured with MERCES_BENCH).
+        Limiter::Off
     } else {
         Limiter::from_framerate(f64::from(cfg.scene.fps_cap.clamp(15, 360)))
     };
