@@ -154,13 +154,21 @@ pub fn dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("org", "Helix", "Merces")
 }
 
+/// `MERCES_HOME` puts the configuration and the data in one folder (benchmarks, tests).
+fn home_override() -> Option<PathBuf> {
+    std::env::var_os("MERCES_HOME").map(PathBuf::from)
+}
+
 pub fn config_path() -> Option<PathBuf> {
+    if let Some(home) = home_override() {
+        return Some(home.join("merces.toml"));
+    }
     dirs().map(|d| d.config_dir().join("merces.toml"))
 }
 
 pub fn data_dir() -> PathBuf {
-    let dir = dirs()
-        .map(|d| d.data_dir().to_path_buf())
+    let dir = home_override()
+        .or_else(|| dirs().map(|d| d.data_dir().to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
     dir

@@ -10,6 +10,7 @@
 
 mod bridge;
 mod config;
+mod perf;
 mod scene;
 mod state;
 mod theme;
@@ -20,6 +21,7 @@ use bevy::window::{PresentMode, WindowResolution};
 use bevy_egui::EguiPlugin;
 
 fn main() {
+    let started = perf::Started(std::time::Instant::now());
     let cfg = config::load();
     let secrets = config::load_secrets();
     let bridge = bridge::Bridge::start(&cfg, &secrets);
@@ -55,8 +57,9 @@ fn main() {
         .insert_resource(secrets)
         .insert_resource(bridge)
         .insert_resource(theme)
+        .insert_resource(started)
         .init_resource::<state::Hub>()
         .add_systems(Update, bridge::pump)
-        .add_plugins((scene::ScenePlugin, ui::UiPlugin))
+        .add_plugins((scene::ScenePlugin, ui::UiPlugin, perf::PerfPlugin))
         .run();
 }
