@@ -49,6 +49,24 @@ pub fn labels(
             );
         }
     }
+    // The input neuron under the pointer: the symbol it feeds the agents.
+    if sel.input_hovered
+        && let Some(at) = project(lay.input - Vec3::Y * (lay.input_size * 1.6 + 0.2))
+    {
+        let name = cfg
+            .engine
+            .symbol(&cfg.active_symbol)
+            .map_or(cfg.active_symbol.clone(), |s| {
+                format!("{} · {}", s.symbol, s.name)
+            });
+        painter.text(
+            at,
+            Align2::CENTER_TOP,
+            format!("{name} — {}", t(lang, "données de marché", "market data")),
+            FontId::new(13.0 * th.scale, theme::medium()),
+            th.pal.text,
+        );
+    }
     // A result badge under the pointer: its one-line summary.
     if let Some((a, index)) = sel.badge
         && let Some(o) = hub

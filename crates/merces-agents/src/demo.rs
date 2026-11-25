@@ -243,7 +243,7 @@ impl DemoLlm {
             }
             _ => (
                 String::new(),
-                json!("**Mode démo.** Je suis l'assistant Merces. Ajoutez votre clé Anthropic dans *Réglages → Données* pour des réponses réelles.\n\n- Cliquez une planète pour voir le travail d'un agent.\n- *Lancer l'analyse* démarre les 4 agents sur le symbole actif."),
+                json!("**Mode démo.** Je suis l'assistant Merces. Ajoutez votre clé Anthropic dans *Réglages → Données* pour des réponses réelles.\n\n- Cliquez un agent pour voir le travail d'un agent.\n- *Lancer l'analyse* démarre les 4 agents sur le symbole actif."),
             ),
         }
     }

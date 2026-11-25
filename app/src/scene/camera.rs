@@ -3,9 +3,10 @@
 //! - Dragging turns the view; on release the rotation keeps its speed and
 //!   slows down smoothly.
 //! - The wheel sets a goal distance; the distance eases towards it.
-//! - Focusing an agent follows it as it orbits: the camera targets the live
+//! - Focusing an agent follows it as it drifts: the camera targets the live
 //!   position plus an offset that decays to zero, so the flight starts where
-//!   the camera was and ends locked on the moving body, without jumps.
+//!   the camera was and ends locked on the moving node, without jumps.
+//! - Pressing on a node drags the node, not the view.
 //! - Every smoothing uses `1 - exp(-k·dt)`: the same motion at any frame rate.
 //! - Reduced motion: no inertia, instant moves.
 
@@ -14,12 +15,16 @@ use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use merces_core::AgentId;
 
-use super::orbits::{PITCH_MAX, PITCH_MIN};
+use super::graph::CENTER;
 use super::{Layout, Selection};
 use crate::config::AppConfig;
 
-/// Distance of the overview (whole system in view).
-pub const OVERVIEW_DIST: f32 = 36.0;
+/// Distance of the overview (whole network in view).
+pub const OVERVIEW_DIST: f32 = 23.0;
+/// Pitch limits (radians above the horizontal): the network reads from the
+/// front, slightly from above or below.
+const PITCH_MIN: f32 = -0.6;
+const PITCH_MAX: f32 = 1.0;
 /// Pause between the agent's greeting and the flight towards it.
 const GREETING: f32 = 0.3;
 
@@ -40,15 +45,17 @@ pub struct OrbitCam {
     /// Sideways shift that keeps a focused agent left of the side panel.
     side: f32,
     drag: f32,
+    /// The current press started on a node (it drags the node, not the view).
+    on_node: bool,
 }
 
 impl Default for OrbitCam {
     fn default() -> Self {
         Self {
-            yaw: 0.35,
-            pitch: 0.95,
+            yaw: 0.0,
+            pitch: 0.18,
             dist: OVERVIEW_DIST,
-            target: Vec3::ZERO,
+            target: CENTER,
             goal_dist: OVERVIEW_DIST,
             yaw_vel: 0.0,
             pitch_vel: 0.0,
@@ -57,6 +64,7 @@ impl Default for OrbitCam {
             offset: Vec3::ZERO,
             side: 0.0,
             drag: 0.0,
+            on_node: false,
         }
     }
 }
@@ -98,6 +106,8 @@ pub fn camera_control(
     }
     let press = buttons.just_pressed(MouseButton::Left) || buttons.just_pressed(MouseButton::Right);
     if press {
+        cam.on_node = sel.hovered.is_some() || sel.input_hovered || sel.badge.is_some();
+        sel.drag_px = 0.0;
         cam.drag = 0.0;
         cam.yaw_vel = 0.0;
         cam.pitch_vel = 0.0;
@@ -105,7 +115,7 @@ pub fn camera_control(
     let held = buttons.pressed(MouseButton::Left) || buttons.pressed(MouseButton::Right);
     if !over_ui {
         // The motion reported on the press frame happened before the press: ignore it.
-        if !press && held {
+        if !press && held && !cam.on_node && !sel.dragging {
             let (dy, dp) = (-motion.delta.x * 0.005, motion.delta.y * 0.004);
             cam.yaw += dy;
             cam.pitch += dp;
@@ -128,6 +138,7 @@ pub fn camera_control(
         if buttons.just_released(MouseButton::Left)
             && cam.drag < 4.0
             && sel.hovered.is_none()
+            && !sel.input_hovered
             && sel.badge.is_none()
             && sel.agent.is_some()
         {
@@ -166,7 +177,7 @@ pub fn camera_control(
         && now >= at
     {
         cam.pending = None;
-        let new_point = next.map_or(Vec3::ZERO, |a| lay.agents[a.index()]);
+        let new_point = next.map_or(CENTER, |a| lay.agents[a.index()]);
         // Continuity: start from where the camera looks now.
         cam.offset = cam.target - new_point;
         cam.focus = next;
@@ -192,7 +203,7 @@ pub fn camera_control(
     cam.side += (side_goal - cam.side) * ko;
 
     let rot = cam.rotation();
-    let focus_point = cam.focus.map_or(Vec3::ZERO, |a| lay.agents[a.index()]);
+    let focus_point = cam.focus.map_or(CENTER, |a| lay.agents[a.index()]);
     cam.target = focus_point + cam.offset + rot * Vec3::X * cam.side;
     tf.translation = cam.target + rot * Vec3::new(0.0, 0.0, cam.dist);
     tf.look_at(cam.target, Vec3::Y);

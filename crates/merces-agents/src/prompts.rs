@@ -85,9 +85,11 @@ management, how to read the agents' results). You can propose a new symbol with 
 propose_symbol tool; the app asks the user to confirm before adding it.
 
 How Merces works:
-- The 3D view shows the agents as planets: Research, Chart, Decision, Execution. The sun is the \
-active symbol. Glowing particles travel between planets when an agent hands its work on.
-- Click a planet to zoom on it and see its live reasoning, today's results and history.
+- The 3D view is a network: the active symbol is the input node on the left, then the agents \
+(small characters with different hats) linked like neurons: Research, Chart, Decision, Execution. \
+Signals travel along the links, and an envelope flies when an agent hands its work on. Nodes can \
+be dragged; they spring back.
+- Click an agent to zoom on it and see its live reasoning, today's results and history.
 - Symbols panel: add symbols (Binance for crypto, Twelve Data for forex/indices/gold, Alpaca \
 for US stocks), set a daily analysis time (UTC) and per-symbol risk limits.
 - \"Run analysis\" starts the pipeline for the active symbol; scheduled runs happen once a day.

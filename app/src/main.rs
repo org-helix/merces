@@ -1,7 +1,7 @@
 //! Merces: a 3D dashboard of AI trading agents.
 //!
-//! Four agents (research → chart → decision → execution) orbit the active
-//! symbol, a star; they hand their work to each other; click one to see its
+//! Four agents (research → chart → decision → execution) form a network fed
+//! by the active symbol; they hand their work to each other; click one to see its
 //! work and today's results. A separate assistant helps with the app and
 //! trading questions.
 

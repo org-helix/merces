@@ -1,7 +1,7 @@
 //! Claude Messages API over raw HTTP (Rust has no official Anthropic SDK).
 //!
 //! - Always streams (SSE) so the UI can show each agent working live.
-//! - Adaptive thinking with summarized display: the summary is what the planet
+//! - Adaptive thinking with summarized display: the summary is what the agent
 //!   panel shows as "reasoning".
 //! - Structured outputs through `output_config.format` (JSON schema).
 //! - Prompt caching on the system prompt, server-side refusal fallbacks on the

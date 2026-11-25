@@ -212,19 +212,11 @@ fn advanced(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
             });
             ui.end_row();
 
-            row(ui, th, t(lang, "Rythme des orbites", "Orbit pace"));
-            ui.add(
-                egui::Slider::new(&mut s.time_scale, 0.25..=3.0)
-                    .step_by(0.25)
-                    .suffix(" ×"),
-            );
-            ui.end_row();
-
             row(ui, th, t(lang, "Mouvement réduit", "Reduced motion"));
             ui.checkbox(&mut s.reduced_motion, "").on_hover_text(t(
                 lang,
-                "Fige les orbites et ne garde que les animations essentielles.",
-                "Freezes the orbits and keeps only the essential animations.",
+                "Fige le réseau et ne garde que les animations essentielles.",
+                "Freezes the network and keeps only the essential animations.",
             ));
             ui.end_row();
 
