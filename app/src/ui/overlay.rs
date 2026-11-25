@@ -1,10 +1,11 @@
-//! Things drawn over the scene: planet labels, the overview card, toasts and
-//! the assistant's symbol proposals.
+//! Things drawn over the scene, only when they are useful: the name of the
+//! agent under the pointer (or selected), the summary of a result badge under
+//! the pointer, toasts, the assistant's symbol proposals and the first-launch
+//! notice.
 
 use bevy::prelude::{Camera, GlobalTransform, Vec3};
 use bevy_egui::egui::{self, Align2, FontId, Pos2, RichText};
 use merces_agents::Command;
-use merces_core::{AgentId, AgentOutput, AgentStatus, RunOutcome};
 
 use super::{agent_name, cards, t};
 use crate::bridge::Bridge;
@@ -30,132 +31,50 @@ pub fn labels(
         egui::Id::new("labels"),
     ));
     let scale = ctx.pixels_per_point();
-    let view = hub.symbol(&cfg.active_symbol);
     let project = |p: Vec3| {
         cam.world_to_viewport(gt, p)
             .ok()
             .map(|v| Pos2::new(v.x / scale, v.y / scale))
     };
-    let font = FontId::new(13.0 * th.scale, theme::medium());
-    for a in AgentId::ALL {
-        let pos = lay.agents[a.index()];
-        let Some(at) = project(pos - Vec3::Y * (lay.sizes[a.index()] + 0.35)) else {
-            continue;
-        };
-        let status = if a == AgentId::Assistant {
-            if hub.chat_busy {
-                AgentStatus::Working
-            } else {
-                AgentStatus::Idle
-            }
-        } else {
-            view.map(|v| v.agent(a).status).unwrap_or_default()
-        };
-        let dot = match status {
-            AgentStatus::Idle => th.pal.muted,
-            AgentStatus::Working => th.pal.accent,
-            AgentStatus::Done => th.pal.success,
-            AgentStatus::NoTrade => th.pal.warning,
-            AgentStatus::Error => th.pal.error,
-        };
-        let strong = sel.agent == Some(a) || sel.hovered == Some(a);
-        let color = if strong { th.pal.text } else { th.pal.body };
-        let rect = painter.text(
-            at + egui::vec2(6.0, 0.0),
-            Align2::CENTER_TOP,
-            agent_name(a, lang),
-            font.clone(),
-            color,
-        );
-        painter.circle_filled(Pos2::new(rect.left() - 8.0, rect.center().y), 3.5, dot);
+    // The name of the agent under the pointer, unless its panel is open.
+    if let Some(a) = sel.hovered.filter(|a| sel.agent != Some(*a)) {
+        let i = a.index();
+        if let Some(at) = project(lay.agents[i] - Vec3::Y * (lay.sizes[i] + 0.2)) {
+            painter.text(
+                at,
+                Align2::CENTER_TOP,
+                agent_name(a, lang),
+                FontId::new(13.0 * th.scale, theme::medium()),
+                th.pal.text,
+            );
+        }
     }
-    if let Some(at) = project(lay.sun - Vec3::Y * (lay.sun_size + 0.5)) {
-        let price = hub
-            .prices
-            .get(&cfg.active_symbol)
-            .map(|p| cards::fmt_price(*p))
-            .unwrap_or_default();
-        painter.text(
-            at,
-            Align2::CENTER_TOP,
-            &cfg.active_symbol,
-            FontId::new(16.0 * th.scale, theme::display()),
-            th.pal.text,
+    // A result badge under the pointer: its one-line summary.
+    if let Some((a, index)) = sel.badge
+        && let Some(o) = hub
+            .symbol(&cfg.active_symbol)
+            .and_then(|v| v.today(a).nth(index))
+    {
+        let text = format!(
+            "{} · {}",
+            o.at.with_timezone(&chrono::Local).format("%H:%M"),
+            cards::one_line(&o.output, lang)
         );
-        painter.text(
-            at + egui::vec2(0.0, 20.0 * th.scale),
-            Align2::CENTER_TOP,
-            price,
-            FontId::new(12.0 * th.scale, egui::FontFamily::Monospace),
-            th.pal.muted,
-        );
-    }
-}
-
-/// Bottom-left card: today's result for the active symbol.
-pub fn overview(ctx: &egui::Context, th: &Theme, cfg: &AppConfig, hub: &Hub, sel: &mut Selection) {
-    let lang = cfg.lang();
-    egui::Area::new(egui::Id::new("overview"))
-        .anchor(Align2::LEFT_BOTTOM, egui::vec2(16.0, -60.0))
-        .show(ctx, |ui| {
-            theme::plate(th).show(ui, |ui| {
-                ui.set_max_width(360.0);
-                ui.label(theme::eyebrow(th, format!("{} · {}", t(lang, "Aujourd'hui", "Today"), cfg.active_symbol)));
-                let view = hub.symbol(&cfg.active_symbol);
-                match view {
-                    Some(v) if v.running.is_some() => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            let working = AgentId::PIPELINE.into_iter().find(|a| v.agent(*a).status == AgentStatus::Working);
-                            let text = match working {
-                                Some(a) => format!("{} {}", agent_name(a, lang), t(lang, "travaille…", "is working…")),
-                                None => t(lang, "Analyse en cours…", "Analysis running…").to_owned(),
-                            };
-                            ui.label(theme::title(th, text, 18.0));
+        if let Some(pos) = ctx.pointer_hover_pos() {
+            egui::Area::new(egui::Id::new("badge-tip"))
+                .fixed_pos(pos + egui::vec2(14.0, 10.0))
+                .order(egui::Order::Tooltip)
+                .interactable(false)
+                .show(ctx, |ui| {
+                    theme::plate(th)
+                        .inner_margin(egui::Margin::symmetric(10, 6))
+                        .show(ui, |ui| {
+                            ui.set_max_width(320.0);
+                            ui.label(RichText::new(text).color(th.pal.text));
                         });
-                    }
-                    Some(v) => {
-                        let decision = v.today(AgentId::Decision).next();
-                        let plan = v.today(AgentId::Execution).next();
-                        match (&v.last_outcome, decision) {
-                            (_, Some(d)) => {
-                                if let AgentOutput::Decision(dec) = &d.output {
-                                    ui.label(theme::title(th, cards::action_label(dec.action, lang), 20.0));
-                                }
-                                if let Some(p) = plan.filter(|p| p.run_id == d.run_id) {
-                                    ui.label(theme::mono(th, cards::one_line(&p.output, lang)));
-                                }
-                            }
-                            (Some((_, RunOutcome::Failed { error })), None) => {
-                                ui.label(RichText::new(error).color(th.pal.error));
-                            }
-                            _ => {
-                                ui.label(theme::title(th, t(lang, "Pas encore d'analyse", "No analysis yet"), 18.0));
-                            }
-                        }
-                        if let Some(b) = v.today(AgentId::Research).next() {
-                            ui.label(RichText::new(cards::one_line(&b.output, lang)).color(th.pal.body));
-                        }
-                    }
-                    None => {
-                        ui.label(theme::title(th, t(lang, "Pas encore d'analyse", "No analysis yet"), 18.0));
-                    }
-                }
-                ui.add_space(4.0);
-                ui.label(
-                    RichText::new(t(
-                        lang,
-                        "Cliquez une planète pour voir le travail de l'agent. Glisser : tourner · molette : zoom.",
-                        "Click a planet to see the agent's work. Drag: rotate · wheel: zoom.",
-                    ))
-                    .size(12.0 * th.scale)
-                    .color(th.pal.muted),
-                );
-                if ui.link(t(lang, "Ouvrir l'assistant", "Open the assistant")).clicked() {
-                    sel.agent = Some(AgentId::Assistant);
-                }
-            });
-        });
+                });
+        }
+    }
 }
 
 pub fn toasts(ctx: &egui::Context, th: &Theme, hub: &Hub) {
@@ -230,4 +149,45 @@ pub fn proposals(
             }
         });
     });
+}
+
+/// The notice shown in full here and in Settings → About.
+pub fn disclaimer(lang: merces_agents::Lang) -> &'static str {
+    t(
+        lang,
+        "Merces est une aide à la décision, pas un conseil financier. Aucun ordre n'est passé : les plans sont suivis sur papier.",
+        "Merces is decision support, not financial advice. No order is placed: plans are tracked on paper.",
+    )
+}
+
+/// First launch: the notice and how to move around, once.
+pub fn welcome(ctx: &egui::Context, th: &Theme, cfg: &mut AppConfig) {
+    if cfg.disclaimer_seen {
+        return;
+    }
+    let lang = cfg.lang();
+    egui::Window::new(t(lang, "Bienvenue", "Welcome"))
+        .collapsible(false)
+        .resizable(false)
+        .title_bar(false)
+        .anchor(Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, |ui| {
+            ui.set_max_width(420.0);
+            ui.label(theme::title(th, t(lang, "Bienvenue dans Merces", "Welcome to Merces"), 22.0));
+            ui.add_space(4.0);
+            ui.label(RichText::new(disclaimer(lang)).color(th.pal.text));
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(t(
+                    lang,
+                    "Quatre agents travaillent à la chaîne autour du symbole actif. Cliquez un agent pour voir son travail ; l'assistant, avec son chapeau de guide, répond à vos questions. Glisser : tourner · molette : zoomer · Échap : vue d'ensemble.",
+                    "Four agents work in a chain around the active symbol. Click an agent to see its work; the assistant, in the guide's hat, answers your questions. Drag: rotate · wheel: zoom · Esc: overview.",
+                ))
+                .color(th.pal.body),
+            );
+            ui.add_space(10.0);
+            if theme::primary_button(ui, th, t(lang, "J'ai compris", "Got it")).clicked() {
+                cfg.disclaimer_seen = true;
+            }
+        });
 }

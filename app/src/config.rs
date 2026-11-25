@@ -29,25 +29,6 @@ pub enum FontChoice {
     Custom(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum Density {
-    Compact,
-    #[default]
-    Comfortable,
-    Spacious,
-}
-
-impl Density {
-    pub fn factor(self) -> f32 {
-        match self {
-            Density::Compact => 0.75,
-            Density::Comfortable => 1.0,
-            Density::Spacious => 1.25,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Appearance {
@@ -58,7 +39,6 @@ pub struct Appearance {
     pub title_font: FontChoice,
     /// Text size multiplier (0.8 – 1.5).
     pub font_scale: f32,
-    pub density: Density,
 }
 
 impl Default for Appearance {
@@ -69,46 +49,51 @@ impl Default for Appearance {
             ui_font: FontChoice::Geist,
             title_font: FontChoice::Bricolage,
             font_scale: 1.0,
-            density: Density::Comfortable,
         }
     }
 }
 
+/// The single 3D quality setting: anti-aliasing, glow and star count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
-pub enum ViewMode {
+pub enum Quality {
+    /// No MSAA, no bloom, fewer stars: integrated GPUs on battery.
+    Low,
     #[default]
-    Solar,
-    Graph,
+    Medium,
+    High,
+}
+
+impl Quality {
+    pub fn msaa(self) -> bool {
+        self != Quality::Low
+    }
+    pub fn bloom(self) -> bool {
+        self != Quality::Low
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SceneSettings {
-    pub view: ViewMode,
-    pub bloom: bool,
-    pub msaa: bool,
+    pub quality: Quality,
     /// 0 = follow the display (vsync).
     pub fps_cap: u32,
-    pub orbit_speed: f32,
-    pub stars: u32,
-    pub labels: bool,
+    /// Pace of the solar system (1 = default).
+    #[serde(alias = "orbit_speed")]
+    pub time_scale: f32,
     /// Drop to 15 fps when the window is not focused.
     pub eco_unfocused: bool,
-    /// Stop orbits and soften animations.
+    /// Freeze the orbits and keep only the essential animations.
     pub reduced_motion: bool,
 }
 
 impl Default for SceneSettings {
     fn default() -> Self {
         Self {
-            view: ViewMode::Solar,
-            bloom: true,
-            msaa: true,
-            fps_cap: 60,
-            orbit_speed: 1.0,
-            stars: 900,
-            labels: true,
+            quality: Quality::Medium,
+            fps_cap: 0,
+            time_scale: 1.0,
             eco_unfocused: true,
             reduced_motion: false,
         }
@@ -124,6 +109,8 @@ pub struct AppConfig {
     /// Simulated Claude and market: no keys, no network, no cost.
     pub demo_mode: bool,
     pub active_symbol: String,
+    /// The "decision support, not financial advice" notice was acknowledged.
+    pub disclaimer_seen: bool,
 }
 
 impl Default for AppConfig {
@@ -140,6 +127,7 @@ impl Default for AppConfig {
             scene: SceneSettings::default(),
             demo_mode: true,
             active_symbol,
+            disclaimer_seen: false,
         }
     }
 }
@@ -154,13 +142,21 @@ pub fn dirs() -> Option<ProjectDirs> {
     ProjectDirs::from("org", "Helix", "Merces")
 }
 
+/// `MERCES_HOME` puts the configuration and the data in one folder (benchmarks, tests).
+fn home_override() -> Option<PathBuf> {
+    std::env::var_os("MERCES_HOME").map(PathBuf::from)
+}
+
 pub fn config_path() -> Option<PathBuf> {
+    if let Some(home) = home_override() {
+        return Some(home.join("merces.toml"));
+    }
     dirs().map(|d| d.config_dir().join("merces.toml"))
 }
 
 pub fn data_dir() -> PathBuf {
-    let dir = dirs()
-        .map(|d| d.data_dir().to_path_buf())
+    let dir = home_override()
+        .or_else(|| dirs().map(|d| d.data_dir().to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."));
     let _ = std::fs::create_dir_all(&dir);
     dir
@@ -324,7 +320,8 @@ mod tests {
     fn config_round_trips_through_toml() {
         let mut c = AppConfig::default();
         c.appearance.ui_font = FontChoice::Custom("C:/fonts/x.ttf".into());
-        c.scene.view = ViewMode::Graph;
+        c.scene.quality = Quality::High;
+        c.disclaimer_seen = true;
         let text = toml::to_string_pretty(&c).unwrap();
         assert_eq!(toml::from_str::<AppConfig>(&text).unwrap(), c);
     }
@@ -337,5 +334,16 @@ mod tests {
         assert_eq!(c.appearance.font_scale, 1.2);
         assert_eq!(c.appearance.theme, ThemeMode::Dark);
         assert_eq!(c.engine.symbols.len(), 1);
+    }
+
+    #[test]
+    fn older_config_keys_still_load() {
+        let c: AppConfig = toml::from_str(
+            "[scene]\nview = \"graph\"\nbloom = false\nstars = 900\norbit_speed = 2.0\n\
+             [appearance]\ndensity = \"compact\"\n",
+        )
+        .unwrap();
+        assert_eq!(c.scene.time_scale, 2.0);
+        assert_eq!(c.scene.quality, Quality::Medium);
     }
 }

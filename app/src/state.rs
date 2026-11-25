@@ -48,6 +48,8 @@ pub struct SymbolView {
     pub outputs: Vec<OutputRecord>,
     pub messages: Vec<MessageRecord>,
     pub running: Option<String>,
+    /// When the last run of this session started.
+    pub run_started: Option<DateTime<Utc>>,
     pub last_outcome: Option<(DateTime<Utc>, RunOutcome)>,
 }
 
@@ -80,7 +82,7 @@ pub struct Toast {
     pub until: f64,
 }
 
-/// A message to animate between two planets.
+/// A hand-off to animate between two agents.
 #[derive(Debug, Clone, Copy)]
 pub struct FlowRequest {
     pub from: AgentId,
@@ -148,6 +150,7 @@ impl Hub {
                 self.run_symbol.insert(run_id.clone(), symbol.clone());
                 let v = self.symbols.entry(symbol).or_default();
                 v.running = Some(run_id.clone());
+                v.run_started = Some(Utc::now());
                 for a in v.agents.iter_mut() {
                     *a = AgentView {
                         run_id: run_id.clone(),

@@ -257,7 +257,7 @@ pub fn apply_style(ctx: &egui::Context, theme: &Theme, a: &Appearance) {
         egui::Theme::Light
     });
     let k = a.font_scale.clamp(0.8, 1.5);
-    let d = a.density.factor();
+    let d = 1.0;
     ctx.all_styles_mut(|style| {
         style.text_styles = [
             (
@@ -383,6 +383,27 @@ pub fn ghost_button(ui: &mut Ui, text: impl Into<RichText>) -> Response {
             .frame(false)
             .min_size(vec2(0.0, 32.0)),
     )
+}
+
+/// Close button of a panel: a drawn ✕ (the text fonts have no such glyph).
+pub fn close_button(ui: &mut Ui, theme: &Theme) -> Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
+    if resp.hovered() {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::same(8), theme.pal.fill_hover);
+    }
+    let c = if resp.hovered() {
+        theme.pal.text
+    } else {
+        theme.pal.muted
+    };
+    let m = rect.center();
+    let st = Stroke::new(1.3, c);
+    ui.painter()
+        .line_segment([m + vec2(-5.0, -5.0), m + vec2(5.0, 5.0)], st);
+    ui.painter()
+        .line_segment([m + vec2(-5.0, 5.0), m + vec2(5.0, -5.0)], st);
+    resp
 }
 
 /// Translucent block for grouped content (no border, no shadow).

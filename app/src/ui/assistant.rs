@@ -1,4 +1,4 @@
-//! The assistant chat (side panel, opened from its planet or the top bar).
+//! The assistant chat (side panel, opened by clicking the assistant).
 
 use bevy_egui::egui::{self, Key, RichText, ScrollArea};
 use merces_agents::{ChatTurn, Command};
@@ -36,7 +36,10 @@ pub fn panel(
                     t(lang, "Hors pipeline", "Outside the pipeline"),
                 ));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::ghost_button(ui, RichText::new("✕").color(th.pal.muted)).clicked() {
+                    if theme::close_button(ui, th)
+                        .on_hover_text(t(lang, "Fermer (Échap)", "Close (Esc)"))
+                        .clicked()
+                    {
                         sel.agent = None;
                     }
                     if !hub.chat.is_empty()

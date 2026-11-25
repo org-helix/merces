@@ -1,8 +1,9 @@
 //! Merces: a 3D dashboard of AI trading agents.
 //!
-//! Four agents (research → chart → decision → execution) orbit the active symbol;
-//! messages travel between them as light; click a planet to see its work and
-//! today's results. A separate assistant helps with the app and trading questions.
+//! Four agents (research → chart → decision → execution) orbit the active
+//! symbol, a star; they hand their work to each other; click one to see its
+//! work and today's results. A separate assistant helps with the app and
+//! trading questions.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // Bevy systems take their dependencies as parameters.
@@ -10,16 +11,18 @@
 
 mod bridge;
 mod config;
+mod perf;
 mod scene;
 mod state;
 mod theme;
 mod ui;
+mod window;
 
 use bevy::prelude::*;
-use bevy::window::{PresentMode, WindowResolution};
 use bevy_egui::EguiPlugin;
 
 fn main() {
+    let started = perf::Started(std::time::Instant::now());
     let cfg = config::load();
     let secrets = config::load_secrets();
     let bridge = bridge::Bridge::start(&cfg, &secrets);
@@ -33,12 +36,7 @@ fn main() {
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Merces".into(),
-                        resolution: WindowResolution::new(1440, 900),
-                        present_mode: PresentMode::AutoVsync,
-                        ..default()
-                    }),
+                    primary_window: Some(window::primary()),
                     ..default()
                 })
                 .set(bevy::log::LogPlugin {
@@ -55,8 +53,14 @@ fn main() {
         .insert_resource(secrets)
         .insert_resource(bridge)
         .insert_resource(theme)
+        .insert_resource(started)
         .init_resource::<state::Hub>()
         .add_systems(Update, bridge::pump)
-        .add_plugins((scene::ScenePlugin, ui::UiPlugin))
+        .add_plugins((
+            scene::ScenePlugin,
+            ui::UiPlugin,
+            window::FramelessPlugin,
+            perf::PerfPlugin,
+        ))
         .run();
 }
