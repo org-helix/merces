@@ -62,7 +62,7 @@ impl Reaction {
 pub struct Anim {
     /// Blend weights of the status poses, indexed like `status_slot`.
     weights: [f32; 5],
-    status: AgentStatus,
+    pub status: AgentStatus,
     reaction: Option<(Reaction, f32)>,
     /// 0..1: how much the character turns towards the camera.
     face: f32,
@@ -561,10 +561,9 @@ pub fn setup_fx(
     });
 }
 
-/// Arc between two moving bodies, lifted above the orbital plane.
+/// Path of a hand-off: the synapse between the two agents.
 pub fn arc(a: Vec3, b: Vec3, t: f32) -> Vec3 {
-    let mid = (a + b) * 0.5 + Vec3::Y * (1.0 + a.distance(b) * 0.3);
-    a.lerp(mid, t).lerp(mid.lerp(b, t), t)
+    super::graph::edge_point(a, b, t)
 }
 
 const HAND_LIFT: Vec3 = Vec3::new(0.0, 0.2, 0.0);

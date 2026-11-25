@@ -1,34 +1,29 @@
-//! The agents as characters: one shared body (a small rounded pebble with two
-//! eyes, stubby arms and feet), and a different hat and accessory per job so
+//! The agents as pixel-art characters, built from voxels: a 12×8 pixel body
+//! with two side arms, two eyes and four legs (the pixel creature of the
+//! reference sprite, given depth), and a pixel hat and accessory per job so
 //! each one reads at a glance:
 //!
 //! | Agent        | Hat                       | Accessory              |
 //! |--------------|---------------------------|------------------------|
 //! | Research     | explorer helmet           | magnifying glass       |
-//! | Chart        | trader's visor            | small chart screen     |
-//! | Decision     | top hat with a red band   | gavel                  |
+//! | Chart        | trader's visor            | chart screen           |
+//! | Decision     | top hat, accent band      | gavel                  |
 //! | Execution    | pilot cap with a badge    | sight over one eye     |
 //! | Assistant    | guide's hat               | speech bubble          |
 //!
-//! Everything is built in code from primitives: no external asset, original
-//! design (see `app/assets/ASSETS.md`). Animation lives in `anim.rs`.
+//! Each piece is one mesh (see `voxel.rs`). A pixel ring under each agent
+//! shows its state. Animation lives in `anim.rs`.
 //!
-//! Today's results (the former moons) are badges floating beside their agent:
-//! one per result, coloured by its outcome, clickable to open the report.
+//! Today's results are pixel badges floating beside their agent: one per
+//! result, coloured by its outcome, clickable to open the report.
 
 use bevy::prelude::*;
-use merces_core::{Action, AgentId, AgentOutput, Bias};
+use merces_core::{Action, AgentId, AgentOutput, AgentStatus, Bias};
 
-use super::{Layout, Selection};
+use super::{Layout, Selection, voxel};
 use crate::config::AppConfig;
 use crate::state::Hub;
 use crate::theme::{self, Theme};
-
-/// Rest-pose anchors (character space, body centre at the origin).
-pub const SHOULDER: Vec3 = Vec3::new(0.40, -0.02, 0.0);
-pub const HAND_DROP: f32 = 0.40;
-pub const HAT_AT: Vec3 = Vec3::new(0.0, 0.47, 0.0);
-pub const EYE: Vec3 = Vec3::new(0.15, 0.16, 0.385);
 
 /// A body part driven by the animation.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
@@ -59,7 +54,7 @@ pub struct Parts {
     pub bubble: Option<Entity>,
 }
 
-/// The root of a character; its transform is set by the orbit layout.
+/// The root of a character; its transform is set by the graph layout.
 #[derive(Component)]
 pub struct Character {
     pub agent: AgentId,
@@ -78,25 +73,6 @@ pub struct ResultBadge {
 pub struct CharacterAssets {
     badge_mesh: Handle<Mesh>,
     badge_mats: [Handle<StandardMaterial>; 5],
-}
-
-struct Kit {
-    sphere: Handle<Mesh>,
-    body: Handle<Mesh>,
-    arm: Handle<Mesh>,
-    cylinder: Handle<Mesh>,
-    cone: Handle<Mesh>,
-    cube: Handle<Mesh>,
-    torus: Handle<Mesh>,
-}
-
-fn mat(mats: &mut Assets<StandardMaterial>, c: Color, roughness: f32) -> Handle<StandardMaterial> {
-    mats.add(StandardMaterial {
-        base_color: c,
-        perceptual_roughness: roughness,
-        reflectance: 0.3,
-        ..default()
-    })
 }
 
 fn glow(mats: &mut Assets<StandardMaterial>, c: Color, k: f32) -> Handle<StandardMaterial> {
@@ -119,46 +95,90 @@ pub fn body_color(agent: AgentId, accent: bevy_egui::egui::Color32) -> Color {
     theme::bevy_color(c)
 }
 
+/// Size of one pixel of the characters, in world units (before the character scale).
+pub const PX: f32 = 0.075;
+
+/// Body voxels sit around the origin: x in [-6, 6), y in [-4, 4) (+ legs
+/// below), z in [-3, 3).
+const BODY_ORIGIN: Vec3 = Vec3::new(0.0, 4.0, 0.0);
+
+fn vox_mat(mats: &mut Assets<StandardMaterial>) -> Handle<StandardMaterial> {
+    mats.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.85,
+        reflectance: 0.2,
+        ..default()
+    })
+}
+
+/// The shared body: the 12×8 pixel block with its four legs, as in the
+/// reference sprite, given depth. The colour comes from the material.
+fn body_model() -> voxel::Model {
+    let mut m = voxel::Model::new();
+    let t = voxel::TINT;
+    m.fill(IVec3::new(-6, 0, -3), IVec3::new(6, 8, 3), t);
+    // A lighter top row and a slightly darker belly row: depth without outlines.
+    m.fill(
+        IVec3::new(-6, 7, -3),
+        IVec3::new(6, 8, 3),
+        [1.08, 1.08, 1.08],
+    );
+    m.fill(IVec3::new(-6, 0, -3), IVec3::new(6, 1, 3), [0.9, 0.9, 0.9]);
+    for x in [-5, -3, 2, 4] {
+        m.fill(
+            IVec3::new(x, -2, -1),
+            IVec3::new(x + 1, 0, 1),
+            [0.92, 0.92, 0.92],
+        );
+    }
+    m
+}
+
+/// A side arm (2×2 pixels), pivoting at the body's edge.
+fn arm_model(side: i32) -> voxel::Model {
+    let mut m = voxel::Model::new();
+    let (x0, x1) = if side > 0 { (0, 2) } else { (-2, 0) };
+    m.fill(IVec3::new(x0, -1, -1), IVec3::new(x1, 1, 1), voxel::TINT);
+    m
+}
+
 pub fn spawn_characters(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     mats: &mut Assets<StandardMaterial>,
     theme: &Theme,
 ) {
-    let kit = Kit {
-        sphere: meshes.add(Sphere::new(1.0).mesh().ico(3).expect("ico sphere")),
-        body: meshes.add(Capsule3d::new(0.42, 0.32).mesh().rings(8).latitudes(20)),
-        arm: meshes.add(Capsule3d::new(0.085, 0.24)),
-        cylinder: meshes.add(Cylinder::new(1.0, 1.0).mesh().resolution(40)),
-        cone: meshes.add(Cone::new(1.0, 1.0).mesh().resolution(40)),
-        cube: meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
-        torus: meshes.add(
-            Torus::new(0.8, 1.0)
-                .mesh()
-                .minor_resolution(12)
-                .major_resolution(40),
-        ),
+    let body_mesh = meshes.add(body_model().mesh(PX, BODY_ORIGIN));
+    let arm_l_mesh = meshes.add(arm_model(-1).mesh(PX, Vec3::ZERO));
+    let arm_r_mesh = meshes.add(arm_model(1).mesh(PX, Vec3::ZERO));
+    let eye_mesh = {
+        let mut m = voxel::Model::new();
+        m.fill(IVec3::ZERO, IVec3::new(1, 2, 1), voxel::rgb(0x0B0908));
+        meshes.add(m.mesh(PX, Vec3::new(0.5, 1.0, 0.5)))
     };
-    let ink = mat(mats, theme::bevy_color(theme::INK), 0.35);
-    let eye = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.08, 0.06, 0.05),
-        perceptual_roughness: 0.15,
-        reflectance: 0.6,
-        ..default()
-    });
-    let alert = glow(mats, theme::bevy_color(theme::DARK.error), 4.0);
+    let alert_mesh = {
+        let mut m = voxel::Model::new();
+        let red = voxel::rgb(0xFF6B5E);
+        m.fill(IVec3::new(0, 2, 0), IVec3::new(1, 6, 1), red);
+        m.set(IVec3::ZERO, red);
+        meshes.add(m.mesh(PX, Vec3::new(0.5, 0.0, 0.5)))
+    };
+    let pedestal_mesh = meshes.add(pedestal_model().mesh(PX, Vec3::new(0.5, 0.0, 0.5)));
+    let vox = vox_mat(mats);
+    let alert = glow(mats, Color::WHITE, 2.5);
 
     for agent in AgentId::ALL {
         let scale = if agent == AgentId::Assistant {
-            0.8
-        } else {
             1.0
+        } else {
+            1.3
         };
+        let color = body_color(agent, theme.pal.accent);
         let body_material = mats.add(StandardMaterial {
-            base_color: body_color(agent, theme.pal.accent),
-            perceptual_roughness: 0.55,
-            reflectance: 0.35,
-            emissive: body_color(agent, theme.pal.accent).to_linear() * 0.03,
+            base_color: color,
+            perceptual_roughness: 0.8,
+            reflectance: 0.25,
+            emissive: color.to_linear() * 0.04,
             ..default()
         });
         let root = commands
@@ -169,9 +189,23 @@ pub fn spawn_characters(
             ))
             .id();
 
+        // A pixel ring under the feet that shows the agent's state.
+        let pedestal_material = glow(mats, theme::bevy_color(theme::AMBER), 0.15);
+        commands.spawn((
+            Mesh3d(pedestal_mesh.clone()),
+            MeshMaterial3d(pedestal_material.clone()),
+            Transform::from_xyz(0.0, -7.2 * PX, 0.0),
+            Pedestal {
+                agent,
+                material: pedestal_material,
+            },
+            Pickable::IGNORE,
+            ChildOf(root),
+        ));
+
         let body = commands
             .spawn((
-                Mesh3d(kit.body.clone()),
+                Mesh3d(body_mesh.clone()),
                 MeshMaterial3d(body_material.clone()),
                 Transform::IDENTITY,
                 Rest(Transform::IDENTITY),
@@ -180,61 +214,44 @@ pub fn spawn_characters(
             ))
             .id();
 
-        // Eyes: dark, glossy, slightly oval.
+        // Eyes: one pixel wide, two tall, standing out of the front face.
         let eye_at = |x: f32| {
-            Transform::from_translation(Vec3::new(x, EYE.y, EYE.z))
-                .with_scale(Vec3::new(0.056, 0.074, 0.04))
+            Transform::from_translation(Vec3::new(x * PX, PX, 3.2 * PX))
+                .with_scale(Vec3::new(1.0, 1.0, 0.5))
         };
-        let eye_l = commands
-            .spawn((
-                Mesh3d(kit.sphere.clone()),
-                MeshMaterial3d(eye.clone()),
-                eye_at(-EYE.x),
-                Rest(eye_at(-EYE.x)),
-                Part::EyeL,
-                ChildOf(body),
-            ))
-            .id();
-        let eye_r = commands
-            .spawn((
-                Mesh3d(kit.sphere.clone()),
-                MeshMaterial3d(eye.clone()),
-                eye_at(EYE.x),
-                Rest(eye_at(EYE.x)),
-                Part::EyeR,
-                ChildOf(body),
-            ))
-            .id();
+        let mut eye = |x: f32, part: Part| {
+            commands
+                .spawn((
+                    Mesh3d(eye_mesh.clone()),
+                    MeshMaterial3d(vox.clone()),
+                    eye_at(x),
+                    Rest(eye_at(x)),
+                    part,
+                    ChildOf(body),
+                ))
+                .id()
+        };
+        let eye_l = eye(-3.5, Part::EyeL);
+        let eye_r = eye(3.5, Part::EyeR);
 
-        // Feet.
-        for x in [-0.17, 0.17] {
-            commands.spawn((
-                Mesh3d(kit.sphere.clone()),
-                MeshMaterial3d(body_material.clone()),
-                Transform::from_xyz(x, -0.57, 0.06).with_scale(Vec3::new(0.15, 0.08, 0.19)),
-                ChildOf(body),
-            ));
-        }
-
-        // Arms: a pivot at the shoulder, the arm hanging below it.
-        let arm = |commands: &mut Commands, side: f32, part: Part| {
-            let rest = Transform::from_translation(SHOULDER * Vec3::new(side, 1.0, 1.0))
-                .with_rotation(Quat::from_rotation_z(side * 0.2));
+        // Arms: the two side pixels, on a pivot at the body's edge.
+        let mut arm = |side: f32, mesh: &Handle<Mesh>, part: Part| {
+            let rest = Transform::from_translation(Vec3::new(side * 6.0 * PX, -PX, 0.0));
             let pivot = commands
                 .spawn((rest, Rest(rest), Visibility::default(), part, ChildOf(body)))
                 .id();
             commands.spawn((
-                Mesh3d(kit.arm.clone()),
+                Mesh3d(mesh.clone()),
                 MeshMaterial3d(body_material.clone()),
-                Transform::from_xyz(0.0, -HAND_DROP * 0.5, 0.0),
+                Transform::IDENTITY,
                 ChildOf(pivot),
             ));
             pivot
         };
-        let arm_l = arm(&mut *commands, -1.0, Part::ArmL);
-        let arm_r = arm(&mut *commands, 1.0, Part::ArmR);
+        let arm_l = arm(-1.0, &arm_l_mesh, Part::ArmL);
+        let arm_r = arm(1.0, &arm_r_mesh, Part::ArmR);
 
-        let hat_rest = Transform::from_translation(HAT_AT);
+        let hat_rest = Transform::from_translation(Vec3::new(0.0, 4.0 * PX, 0.0));
         let hat = commands
             .spawn((
                 hat_rest,
@@ -245,8 +262,8 @@ pub fn spawn_characters(
             ))
             .id();
 
-        // Error signal: a small "!" above the hat, hidden unless in error.
-        let alert_rest = Transform::from_xyz(0.0, 1.12, 0.0);
+        // Error signal: a pixel "!" above the hat, hidden unless in error.
+        let alert_rest = Transform::from_xyz(0.0, 15.0 * PX, 0.0);
         let alert_e = commands
             .spawn((
                 alert_rest,
@@ -257,32 +274,14 @@ pub fn spawn_characters(
             ))
             .id();
         commands.spawn((
-            Mesh3d(kit.arm.clone()),
+            Mesh3d(alert_mesh.clone()),
             MeshMaterial3d(alert.clone()),
-            Transform::from_xyz(0.0, 0.14, 0.0).with_scale(Vec3::new(0.5, 0.45, 0.5)),
-            ChildOf(alert_e),
-            Pickable::IGNORE,
-        ));
-        commands.spawn((
-            Mesh3d(kit.sphere.clone()),
-            MeshMaterial3d(alert.clone()),
-            Transform::from_scale(Vec3::splat(0.05)),
+            Transform::IDENTITY,
             ChildOf(alert_e),
             Pickable::IGNORE,
         ));
 
-        let bubble = dress(
-            &mut *commands,
-            mats,
-            &kit,
-            agent,
-            body,
-            hat,
-            arm_l,
-            arm_r,
-            &ink,
-            theme,
-        );
+        let bubble = dress(commands, meshes, &vox, agent, body, hat, arm_r, theme);
 
         commands.entity(root).insert((
             super::anim::Anim::new(agent),
@@ -305,11 +304,15 @@ pub fn spawn_characters(
         commands
             .entity(root)
             .observe(move |ev: On<PointerClick>, mut sel: ResMut<Selection>| {
-                if ev.button == PointerButton::Primary {
+                // A click that ends a drag only moved the node.
+                if ev.button == PointerButton::Primary && sel.drag_px < 6.0 {
                     sel.agent = Some(agent);
                     sel.output = None;
                 }
             })
+            .observe(super::graph::drag_start(agent.index()))
+            .observe(super::graph::drag_move(agent.index()))
+            .observe(super::graph::drag_end)
             .observe(move |_: On<PointerOver>, mut sel: ResMut<Selection>| {
                 sel.hovered = Some(agent)
             })
@@ -321,282 +324,236 @@ pub fn spawn_characters(
     }
 }
 
-/// A piece of a hat or accessory.
+/// A flat ring of pixels (radius about 7).
+fn pedestal_model() -> voxel::Model {
+    let mut m = voxel::Model::new();
+    for x in -8..8 {
+        for z in -8..8 {
+            let d = ((x as f32 + 0.5).powi(2) + (z as f32 + 0.5).powi(2)).sqrt();
+            if (6.2..7.6).contains(&d) {
+                m.set(IVec3::new(x, 0, z), voxel::TINT);
+            }
+        }
+    }
+    m
+}
+
+/// A voxel piece attached to `parent`.
 fn piece(
     commands: &mut Commands,
-    mesh: &Handle<Mesh>,
-    material: &Handle<StandardMaterial>,
+    meshes: &mut Assets<Mesh>,
+    vox: &Handle<StandardMaterial>,
+    model: &voxel::Model,
     parent: Entity,
-    tf: Transform,
+    at: Vec3,
 ) -> Entity {
     commands
         .spawn((
-            Mesh3d(mesh.clone()),
-            MeshMaterial3d(material.clone()),
-            tf,
+            Mesh3d(meshes.add(model.mesh(PX, Vec3::ZERO))),
+            MeshMaterial3d(vox.clone()),
+            Transform::from_translation(at),
             ChildOf(parent),
         ))
         .id()
 }
 
-fn cyl(r: f32, h: f32, y: f32) -> Transform {
-    Transform::from_xyz(0.0, y, 0.0).with_scale(Vec3::new(r, h, r))
-}
-
-/// Hat and accessory of one agent. Returns the speech bubble (assistant only).
+/// Pixel hat and accessory of one agent. Returns the speech bubble (assistant only).
+#[allow(clippy::too_many_arguments)]
 fn dress(
     commands: &mut Commands,
-    mats: &mut Assets<StandardMaterial>,
-    kit: &Kit,
+    meshes: &mut Assets<Mesh>,
+    vox: &Handle<StandardMaterial>,
     agent: AgentId,
     body: Entity,
     hat: Entity,
-    arm_l: Entity,
     arm_r: Entity,
-    ink: &Handle<StandardMaterial>,
     theme: &Theme,
 ) -> Option<Entity> {
-    let hand = Vec3::new(0.0, -HAND_DROP, 0.02);
-    let red = mat(mats, theme::bevy_color(theme.pal.accent), 0.5);
+    let v = IVec3::new;
+    let rgb = voxel::rgb;
+    let accent = theme.pal.accent;
+    let accent = [
+        f32::from(accent.r()) / 255.0,
+        f32::from(accent.g()) / 255.0,
+        f32::from(accent.b()) / 255.0,
+    ];
+    let ink = rgb(0x2A221C);
+    let mut h = voxel::Model::new();
+    let mut tool = voxel::Model::new();
+    let mut on_body = voxel::Model::new();
     match agent {
         AgentId::Research => {
-            // Explorer helmet: domed crown, wide flat brim, dark band.
-            let khaki = mat(mats, Color::srgb_u8(0xB5, 0x9A, 0x73), 0.75);
-            piece(
-                commands,
-                &kit.sphere,
-                &khaki,
-                hat,
-                Transform::from_xyz(0.0, 0.07, 0.0).with_scale(Vec3::new(0.35, 0.27, 0.37)),
-            );
-            piece(commands, &kit.cylinder, &khaki, hat, cyl(0.54, 0.025, 0.0));
-            piece(commands, &kit.cylinder, ink, hat, cyl(0.355, 0.06, 0.04));
-            // Magnifying glass in the right hand.
-            let brass = mat(mats, Color::srgb_u8(0xC9, 0x9A, 0x4E), 0.3);
-            let glass = mats.add(StandardMaterial {
-                base_color: Color::srgba(0.85, 0.9, 1.0, 0.35),
-                alpha_mode: AlphaMode::Blend,
-                perceptual_roughness: 0.05,
-                reflectance: 0.8,
-                ..default()
-            });
-            let lens = Transform::from_translation(hand + Vec3::new(0.0, -0.2, 0.08))
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
-            let holder = commands
-                .spawn((lens, Visibility::default(), ChildOf(arm_r)))
-                .id();
-            piece(
-                commands,
-                &kit.torus,
-                &brass,
-                holder,
-                Transform::from_scale(Vec3::splat(0.14)),
-            );
-            piece(
-                commands,
-                &kit.cylinder,
-                &glass,
-                holder,
-                cyl(0.12, 0.01, 0.0),
-            );
-            piece(
-                commands,
-                &kit.cylinder,
-                ink,
-                holder,
-                Transform::from_xyz(0.0, 0.0, -0.21)
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2))
-                    .with_scale(Vec3::new(0.025, 0.14, 0.025)),
-            );
+            // Explorer helmet: wide brim, dark band, khaki dome.
+            let (khaki, light) = (rgb(0xB59A73), rgb(0xCDB48A));
+            h.fill(v(-7, 0, -4), v(7, 1, 4), khaki)
+                .fill(v(-5, 1, -3), v(5, 2, 3), ink)
+                .fill(v(-5, 2, -3), v(5, 4, 3), khaki)
+                .fill(v(-4, 4, -2), v(4, 5, 2), light)
+                .fill(v(-2, 5, -1), v(2, 6, 1), light);
+            // Magnifying glass: brass frame, pale lens, wooden handle.
+            let (brass, lens, wood) = (rgb(0xC99A4E), rgb(0xBFD8E8), rgb(0x6B4A2E));
+            tool.fill(v(1, -3, 0), v(2, -1, 1), wood)
+                .fill(v(0, -8, 0), v(4, -3, 1), brass)
+                .fill(v(1, -7, 0), v(3, -4, 1), lens);
         }
         AgentId::Chart => {
-            // Trader's visor: a band round the head and a tinted bill.
-            piece(
-                commands,
-                &kit.torus,
-                &red,
-                hat,
-                Transform::from_xyz(0.0, -0.04, 0.0).with_scale(Vec3::new(0.43, 0.3, 0.43)),
-            );
-            let visor = mats.add(StandardMaterial {
-                base_color: Color::srgba_u8(0x3A, 0x5A, 0x4C, 210),
-                alpha_mode: AlphaMode::Blend,
-                perceptual_roughness: 0.3,
-                ..default()
-            });
-            piece(
-                commands,
-                &kit.cylinder,
-                &visor,
-                hat,
-                Transform::from_xyz(0.0, -0.02, 0.3)
-                    .with_rotation(Quat::from_rotation_x(0.28))
-                    .with_scale(Vec3::new(0.3, 0.02, 0.2)),
-            );
-            // A small chart screen in the left hand.
-            let screen = commands
-                .spawn((
-                    Transform::from_translation(hand + Vec3::new(0.05, -0.06, 0.14))
-                        .with_rotation(Quat::from_rotation_x(-0.5)),
-                    Visibility::default(),
-                    ChildOf(arm_l),
-                ))
-                .id();
-            piece(
-                commands,
-                &kit.cube,
-                ink,
-                screen,
-                Transform::from_scale(Vec3::new(0.34, 0.24, 0.03)),
-            );
-            let bars = glow(mats, theme::bevy_color(theme::PALE_ORANGE), 1.6);
-            let up = glow(mats, theme::bevy_color(theme::DARK.success), 1.4);
-            for (i, h) in [0.06, 0.1, 0.08, 0.15].into_iter().enumerate() {
-                let m = if i == 3 { &up } else { &bars };
-                piece(
-                    commands,
-                    &kit.cube,
-                    m,
-                    screen,
-                    Transform::from_xyz(-0.105 + i as f32 * 0.07, -0.08 + h * 0.5, 0.017)
-                        .with_scale(Vec3::new(0.04, h, 0.006)),
-                );
+            // Trader's visor: a light band and a green bill.
+            let (band, green, tip) = (rgb(0xEDE6DA), rgb(0x3E8E5A), rgb(0x5DB57B));
+            h.fill(v(-6, 0, -3), v(6, 1, 3), band)
+                .clear(v(-5, 0, -2), v(5, 1, 2))
+                .fill(v(-5, 0, 3), v(5, 1, 5), green)
+                .fill(v(-4, 0, 5), v(4, 1, 6), tip);
+            // A small chart screen with candles.
+            let (screen, up, down) = (rgb(0x1E1914), rgb(0x4ADE80), rgb(0xFF8A8A));
+            tool.fill(v(1, -8, 0), v(9, -2, 1), ink)
+                .fill(v(2, -7, 0), v(8, -3, 1), screen);
+            for (x, y0, y1, c) in [
+                (2, -7, -5, up),
+                (3, -6, -4, down),
+                (4, -6, -3, up),
+                (5, -5, -4, down),
+                (6, -5, -3, up),
+                (7, -4, -3, up),
+            ] {
+                tool.fill(v(x, y0, 1), v(x + 1, y1, 2), c);
             }
         }
         AgentId::Decision => {
-            // Top hat with a red band.
-            piece(commands, &kit.cylinder, ink, hat, cyl(0.25, 0.44, 0.25));
-            piece(commands, &kit.cylinder, ink, hat, cyl(0.4, 0.03, 0.03));
-            piece(commands, &kit.cylinder, &red, hat, cyl(0.255, 0.07, 0.08));
-            // Gavel in the right hand.
-            let wood = mat(mats, Color::srgb_u8(0x7A, 0x4E, 0x30), 0.6);
-            let gavel = commands
-                .spawn((
-                    Transform::from_translation(hand + Vec3::new(0.0, -0.02, 0.05))
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                    Visibility::default(),
-                    ChildOf(arm_r),
-                ))
-                .id();
-            piece(commands, &kit.cylinder, &wood, gavel, cyl(0.022, 0.3, 0.12));
-            piece(
-                commands,
-                &kit.cylinder,
-                &wood,
-                gavel,
-                Transform::from_xyz(0.0, 0.28, 0.0)
-                    .with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2))
-                    .with_scale(Vec3::new(0.065, 0.2, 0.065)),
-            );
+            // Top hat with a band in the accent colour.
+            let (black, top) = (rgb(0x231D19), rgb(0x3C332B));
+            h.fill(v(-6, 0, -4), v(6, 1, 4), black)
+                .fill(v(-4, 1, -3), v(4, 2, 3), accent)
+                .fill(v(-4, 2, -3), v(4, 7, 3), black)
+                .fill(v(-4, 7, -3), v(4, 8, 3), top);
+            // Gavel.
+            let (wood, dark) = (rgb(0x8A5A3A), rgb(0x5C3A24));
+            tool.fill(v(1, -5, 0), v(2, -1, 1), wood)
+                .fill(v(-1, -7, -1), v(4, -5, 2), dark)
+                .fill(v(0, -7, -1), v(1, -5, 2), wood);
         }
         AgentId::Execution => {
-            // Pilot cap: flat wide crown, dark band, bill, gold badge.
-            let navy = mat(mats, Color::srgb_u8(0x2A, 0x2B, 0x36), 0.5);
-            piece(commands, &kit.cylinder, &navy, hat, cyl(0.37, 0.12, 0.1));
-            piece(commands, &kit.cylinder, ink, hat, cyl(0.345, 0.09, 0.0));
-            piece(
-                commands,
-                &kit.cylinder,
-                ink,
-                hat,
-                Transform::from_xyz(0.0, -0.03, 0.33)
-                    .with_rotation(Quat::from_rotation_x(0.3))
-                    .with_scale(Vec3::new(0.24, 0.02, 0.16)),
-            );
-            let gold = glow(mats, Color::srgb_u8(0xE8, 0xB8, 0x5A), 0.6);
-            piece(
-                commands,
-                &kit.sphere,
-                &gold,
-                hat,
-                Transform::from_xyz(0.0, 0.1, 0.36).with_scale(Vec3::new(0.05, 0.05, 0.02)),
-            );
-            // A sight over the right eye.
-            let sight = commands
-                .spawn((
-                    Transform::from_xyz(EYE.x, EYE.y, EYE.z + 0.03)
-                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-                    Visibility::default(),
-                    ChildOf(body),
-                ))
-                .id();
-            piece(
-                commands,
-                &kit.torus,
-                &gold,
-                sight,
-                Transform::from_scale(Vec3::splat(0.1)),
-            );
-            let lens = glow(mats, theme::bevy_color(theme.pal.accent), 0.8);
-            piece(
-                commands,
-                &kit.cube,
-                &lens,
-                sight,
-                Transform::from_scale(Vec3::new(0.15, 0.004, 0.012)),
-            );
-            piece(
-                commands,
-                &kit.cube,
-                &lens,
-                sight,
-                Transform::from_scale(Vec3::new(0.012, 0.004, 0.15)),
-            );
+            // Pilot cap: navy crown, black visor, gold badge.
+            let (navy, light, gold) = (rgb(0x2E3A55), rgb(0x3E4C6E), rgb(0xE0B040));
+            h.fill(v(-5, 0, -3), v(5, 3, 3), navy)
+                .fill(v(-4, 3, -2), v(4, 4, 2), light)
+                .fill(v(-5, 0, 3), v(5, 1, 6), ink)
+                .fill(v(-1, 1, 3), v(1, 3, 4), gold);
+            // Sight over the right eye: a red pixel frame.
+            let red = rgb(0xD9483B);
+            on_body
+                .fill(v(2, 3, 3), v(6, 7, 4), red)
+                .clear(v(3, 4, 3), v(5, 6, 4));
         }
         AgentId::Assistant => {
-            // Guide's hat: wide brim, pointed crown, rust band.
-            let felt = mat(mats, Color::srgb_u8(0x6E, 0x58, 0x45), 0.85);
-            piece(commands, &kit.cylinder, &felt, hat, cyl(0.56, 0.025, 0.0));
-            piece(
-                commands,
-                &kit.cone,
-                &felt,
-                hat,
-                Transform::from_xyz(0.0, 0.19, 0.0).with_scale(Vec3::new(0.3, 0.38, 0.3)),
-            );
-            let band = mat(mats, theme::bevy_color(theme::RUST), 0.6);
-            piece(commands, &kit.cylinder, &band, hat, cyl(0.285, 0.05, 0.035));
-            // Speech bubble beside the head.
-            let rest = Transform::from_xyz(0.62, 0.78, 0.0);
-            let bubble = commands
-                .spawn((
-                    rest,
-                    Rest(rest),
-                    Visibility::default(),
-                    Part::Bubble,
-                    ChildOf(body),
-                ))
-                .id();
-            let paper = glow(mats, theme::bevy_color(theme::AMBER), 0.25);
-            piece(
-                commands,
-                &kit.sphere,
-                &paper,
-                bubble,
-                Transform::from_scale(Vec3::new(0.27, 0.19, 0.08)),
-            );
-            piece(
-                commands,
-                &kit.cone,
-                &paper,
-                bubble,
-                Transform::from_xyz(-0.14, -0.17, 0.0)
-                    .with_rotation(Quat::from_rotation_z(2.5))
-                    .with_scale(Vec3::new(0.06, 0.14, 0.04)),
-            );
-            for x in [-0.09, 0.0, 0.09] {
-                piece(
-                    commands,
-                    &kit.sphere,
-                    ink,
-                    bubble,
-                    Transform::from_xyz(x, 0.0, 0.07).with_scale(Vec3::splat(0.028)),
-                );
-            }
-            return Some(bubble);
+            // Guide's hat: stepped point with a gold band.
+            let (brown, gold) = (rgb(0x7A5A3A), rgb(0xD9B25A));
+            h.fill(v(-6, 0, -4), v(6, 1, 4), brown)
+                .fill(v(-4, 1, -3), v(4, 2, 3), gold)
+                .fill(v(-4, 2, -3), v(4, 3, 3), brown)
+                .fill(v(-3, 3, -2), v(3, 5, 2), brown)
+                .fill(v(-2, 5, -1), v(2, 7, 1), brown)
+                .fill(v(-1, 7, -1), v(0, 9, 0), brown);
         }
     }
-    None
+    piece(commands, meshes, vox, &h, hat, Vec3::ZERO);
+    if tool.len() > 0 {
+        piece(
+            commands,
+            meshes,
+            vox,
+            &tool,
+            arm_r,
+            Vec3::new(2.0 * PX, 0.0, 1.0 * PX),
+        );
+    }
+    if on_body.len() > 0 {
+        piece(commands, meshes, vox, &on_body, body, -BODY_ORIGIN * PX);
+    }
+    if agent != AgentId::Assistant {
+        return None;
+    }
+    // Speech bubble beside the head, with three dots.
+    let (paper, dots) = (rgb(0xFAF6ED), rgb(0x322921));
+    let mut b = voxel::Model::new();
+    b.fill(v(0, 1, 0), v(9, 6, 1), paper)
+        .clear(v(0, 1, 0), v(1, 2, 1))
+        .clear(v(8, 1, 0), v(9, 2, 1))
+        .clear(v(0, 5, 0), v(1, 6, 1))
+        .clear(v(8, 5, 0), v(9, 6, 1))
+        .set(v(1, 0, 0), paper);
+    for x in [2, 4, 6] {
+        b.set(v(x, 3, 1), dots);
+    }
+    let rest = Transform::from_translation(Vec3::new(5.0 * PX, 8.0 * PX, 0.0));
+    let bubble = commands
+        .spawn((
+            rest,
+            Rest(rest),
+            Visibility::default(),
+            Part::Bubble,
+            ChildOf(body),
+        ))
+        .id();
+    piece(commands, meshes, vox, &b, bubble, Vec3::ZERO);
+    Some(bubble)
+}
+
+/// Marker of the status ring under an agent.
+#[derive(Component)]
+pub struct Pedestal {
+    agent: AgentId,
+    material: Handle<StandardMaterial>,
+}
+
+/// The ring under each agent glows in its state's colour; it breathes while
+/// the agent works. Materials are written only when the look changes.
+pub fn pedestals(
+    time: Res<Time>,
+    cfg: Res<AppConfig>,
+    theme: Res<Theme>,
+    sel: Res<Selection>,
+    anims: Query<(&Character, &super::anim::Anim)>,
+    rings: Query<&Pedestal>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    mut last: Local<[Option<(u8, bool, u32)>; 5]>,
+) {
+    let t = time.elapsed_secs();
+    let calm = cfg.scene.reduced_motion;
+    let mut status = [AgentStatus::Idle; 5];
+    for (c, a) in &anims {
+        status[c.agent.index()] = a.status;
+    }
+    for r in &rings {
+        let i = r.agent.index();
+        let s = status[i];
+        let lit = sel.agent == Some(r.agent) || sel.hovered == Some(r.agent);
+        let working = s == AgentStatus::Working && !calm;
+        // Quantised breathing so the material is not rewritten every frame for nothing.
+        let phase = if working {
+            ((t * 2.4).sin() * 8.0).round() as i32 + 8
+        } else {
+            0
+        } as u32;
+        let key = (s as u8, lit, phase);
+        if last[i] == Some(key) {
+            continue;
+        }
+        last[i] = Some(key);
+        let p = theme.pal;
+        let (c, k) = match s {
+            AgentStatus::Idle => (theme::AMBER, 0.12),
+            AgentStatus::Working => (p.accent, 1.2 + 0.12 * phase as f32),
+            AgentStatus::Done => (theme::DARK.success, 0.9),
+            AgentStatus::NoTrade => (theme::DARK.warning, 0.9),
+            AgentStatus::Error => (theme::DARK.error, 1.4),
+        };
+        let k = if lit { k + 0.5 } else { k };
+        if let Some(mut m) = mats.get_mut(&r.material) {
+            let col = theme::bevy_color(c);
+            m.base_color = col;
+            m.emissive = col.to_linear() * k;
+        }
+    }
 }
 
 // ── Result badges ──────────────────────────────────────────────────────────
@@ -618,7 +575,7 @@ pub fn setup_badges(
         m(mats, theme::PALE_ORANGE),
     ];
     commands.insert_resource(CharacterAssets {
-        badge_mesh: meshes.add(Cylinder::new(0.095, 0.03).mesh().resolution(28)),
+        badge_mesh: meshes.add(Cuboid::new(0.16, 0.035, 0.16)),
         badge_mats,
     });
 }

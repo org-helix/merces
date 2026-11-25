@@ -79,12 +79,9 @@ pub struct SceneSettings {
     pub quality: Quality,
     /// 0 = follow the display (vsync).
     pub fps_cap: u32,
-    /// Pace of the solar system (1 = default).
-    #[serde(alias = "orbit_speed")]
-    pub time_scale: f32,
     /// Drop to 15 fps when the window is not focused.
     pub eco_unfocused: bool,
-    /// Freeze the orbits and keep only the essential animations.
+    /// Freeze the network and keep only the essential animations.
     pub reduced_motion: bool,
 }
 
@@ -93,7 +90,6 @@ impl Default for SceneSettings {
         Self {
             quality: Quality::Medium,
             fps_cap: 0,
-            time_scale: 1.0,
             eco_unfocused: true,
             reduced_motion: false,
         }
@@ -343,7 +339,7 @@ mod tests {
              [appearance]\ndensity = \"compact\"\n",
         )
         .unwrap();
-        assert_eq!(c.scene.time_scale, 2.0);
+        assert!(!c.scene.reduced_motion);
         assert_eq!(c.scene.quality, Quality::Medium);
     }
 }

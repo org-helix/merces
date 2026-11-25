@@ -131,7 +131,7 @@ impl Default for AgentSettings {
     }
 }
 
-/// What an agent is doing right now (drives the planet's look).
+/// What an agent is doing right now (drives the character's look).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentStatus {

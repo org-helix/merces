@@ -1,7 +1,6 @@
-//! The sky and the star: a star field drawn in one pass (one mesh, one draw), a
-//! faint Milky Way band, and the central star with an animated surface, a
-//! corona and a halo. All the animation runs on the GPU from the global time:
-//! no material is touched per frame (only while the activity level ramps).
+//! The backdrop of the network: a star field drawn in one pass (one mesh, one
+//! draw) and a faint Milky Way band. All the animation runs on the GPU from the
+//! global time: no material is touched per frame.
 //!
 //! The 3D scene keeps a dark sky in both themes: the panels follow the light
 //! theme, the night sky stays night.
@@ -20,21 +19,14 @@ use bevy::shader::{Shader, ShaderRef};
 use bevy::window::PrimaryWindow;
 use merces_agents::demo::Rng;
 
-use super::Selection;
-use super::orbits::SUN_RADIUS;
 use crate::config::{AppConfig, Quality};
-use crate::state::Hub;
-use crate::theme::{self, Theme};
+use crate::theme;
 
 const STARS_SHADER: Handle<Shader> = uuid_handle!("6f1c7a52-3b0e-4d39-9a51-0c6a2f0d8e11");
 const SKY_SHADER: Handle<Shader> = uuid_handle!("6f1c7a52-3b0e-4d39-9a51-0c6a2f0d8e12");
-const SUN_SHADER: Handle<Shader> = uuid_handle!("6f1c7a52-3b0e-4d39-9a51-0c6a2f0d8e13");
-const CORONA_SHADER: Handle<Shader> = uuid_handle!("6f1c7a52-3b0e-4d39-9a51-0c6a2f0d8e14");
 
 const NOISE: &str = include_str!("shaders/noise.wesl");
 
-/// Corona quad half-size, in star radii.
-const CORONA_EXTENT: f32 = 3.2;
 const SKY_RADIUS: f32 = 240.0;
 
 pub struct SkyPlugin;
@@ -54,27 +46,15 @@ impl Plugin for SkyPlugin {
                 with_noise(include_str!("shaders/sky.wesl")),
                 "merces/sky.wesl",
             ),
-            (
-                SUN_SHADER,
-                with_noise(include_str!("shaders/sun.wesl")),
-                "merces/sun.wesl",
-            ),
-            (
-                CORONA_SHADER,
-                with_noise(include_str!("shaders/corona.wesl")),
-                "merces/corona.wesl",
-            ),
         ] {
             let _ = shaders.insert(handle.id(), Shader::from_wesl(source, path));
         }
         app.add_plugins((
             MaterialPlugin::<StarMaterial>::default(),
             MaterialPlugin::<SkyMaterial>::default(),
-            MaterialPlugin::<SunMaterial>::default(),
-            MaterialPlugin::<CoronaMaterial>::default(),
         ))
         .add_systems(Startup, spawn)
-        .add_systems(Update, (star_field, star_settings, star_activity));
+        .add_systems(Update, (star_field, star_settings));
     }
 }
 
@@ -138,66 +118,7 @@ impl Material for SkyMaterial {
     }
 }
 
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct SunMaterial {
-    #[uniform(0)]
-    hot: LinearRgba,
-    #[uniform(0)]
-    cool: LinearRgba,
-    #[uniform(0)]
-    misc: Vec4,
-}
-
-impl Material for SunMaterial {
-    fn fragment_shader() -> ShaderRef {
-        SUN_SHADER.into()
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-}
-
-#[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
-pub struct CoronaMaterial {
-    #[uniform(0)]
-    inner: LinearRgba,
-    #[uniform(0)]
-    outer: LinearRgba,
-    #[uniform(0)]
-    misc: Vec4,
-}
-
-impl Material for CoronaMaterial {
-    fn vertex_shader() -> ShaderRef {
-        CORONA_SHADER.into()
-    }
-    fn fragment_shader() -> ShaderRef {
-        CORONA_SHADER.into()
-    }
-    fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Add
-    }
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-    fn specialize(
-        _pipeline: &MaterialPipeline,
-        descriptor: &mut RenderPipelineDescriptor,
-        _layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialPipelineKey<Self>,
-    ) -> Result<(), SpecializedMeshPipelineError> {
-        descriptor.primitive.cull_mode = None;
-        Ok(())
-    }
-}
-
 // ── Entities ───────────────────────────────────────────────────────────────
-
-#[derive(Component)]
-pub struct Sun;
 
 #[derive(Component)]
 struct StarField;
@@ -205,8 +126,6 @@ struct StarField;
 #[derive(Resource)]
 struct SkyHandles {
     stars: Handle<StarMaterial>,
-    sun: Handle<SunMaterial>,
-    corona: Handle<CoronaMaterial>,
 }
 
 fn lin(c: bevy_egui::egui::Color32) -> LinearRgba {
@@ -218,10 +137,7 @@ fn spawn(
     mut meshes: ResMut<Assets<Mesh>>,
     mut stars: ResMut<Assets<StarMaterial>>,
     mut skies: ResMut<Assets<SkyMaterial>>,
-    mut suns: ResMut<Assets<SunMaterial>>,
-    mut coronas: ResMut<Assets<CoronaMaterial>>,
     cfg: Res<AppConfig>,
-    theme: Res<Theme>,
 ) {
     let motion = if cfg.scene.reduced_motion { 0.0 } else { 1.0 };
 
@@ -242,80 +158,7 @@ fn spawn(
         params: Vec4::new(motion, 1.0, 1.0, 0.0),
     });
 
-    // The star (active symbol).
-    let (hot, cool) = sun_colors(&theme);
-    let sun_mat = suns.add(SunMaterial {
-        hot: hot.with_alpha(4.2),
-        cool: cool.with_alpha(0.0),
-        misc: Vec4::new(motion, 0.0, 0.0, 0.0),
-    });
-    commands
-        .spawn((
-            Mesh3d(meshes.add(Sphere::new(1.0).mesh().ico(6).expect("ico sphere"))),
-            MeshMaterial3d(sun_mat.clone()),
-            Transform::from_scale(Vec3::splat(SUN_RADIUS)),
-            Sun,
-            Name::new("sun"),
-        ))
-        .observe(|_: On<PointerClick>, mut sel: ResMut<Selection>| {
-            sel.agent = None;
-            sel.output = None;
-        });
-    let corona_mat = coronas.add(CoronaMaterial {
-        inner: hot.with_alpha(1.2),
-        outer: cool.with_alpha(0.0),
-        misc: Vec4::new(motion, CORONA_EXTENT, 0.0, 0.0),
-    });
-    commands.spawn((
-        Mesh3d(meshes.add(corner_quad())),
-        MeshMaterial3d(corona_mat.clone()),
-        Transform::from_scale(Vec3::splat(SUN_RADIUS * CORONA_EXTENT)),
-        Pickable::IGNORE,
-        NoFrustumCulling,
-        Name::new("corona"),
-    ));
-    // The star lights the agents; a warm, low ambient keeps their night side readable.
-    commands.spawn((
-        PointLight {
-            intensity: 9_000_000.0,
-            range: 300.0,
-            shadow_maps_enabled: false,
-            color: Color::srgb(1.0, 0.9, 0.78),
-            ..default()
-        },
-        Transform::default(),
-    ));
-    commands.insert_resource(GlobalAmbientLight {
-        color: theme::bevy_color(theme::AMBER),
-        brightness: 160.0,
-        ..default()
-    });
-    commands.insert_resource(SkyHandles {
-        stars: star_mat,
-        sun: sun_mat,
-        corona: corona_mat,
-    });
-}
-
-fn sun_colors(theme: &Theme) -> (LinearRgba, LinearRgba) {
-    let hot = LinearRgba::from(Color::srgb(1.0, 0.88, 0.72));
-    let cool = LinearRgba::from(Color::srgb(0.92, 0.5, 0.26)).mix(&lin(theme.pal.accent), 0.2);
-    (hot, cool)
-}
-
-/// A quad whose positions and UVs are both the corner in [-1, 1]².
-fn corner_quad() -> Mesh {
-    let corners = [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
-    Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::RENDER_WORLD,
-    )
-    .with_inserted_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        corners.map(|[x, y]| [x, y, 0.0]).to_vec(),
-    )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, corners.to_vec())
-    .with_inserted_indices(Indices::U16(vec![0, 1, 2, 0, 2, 3]))
+    commands.insert_resource(SkyHandles { stars: star_mat });
 }
 
 pub fn star_count(q: Quality) -> u32 {
@@ -449,16 +292,13 @@ fn star_field(
 /// Twinkle, star size on HiDPI screens and the star's motion follow the settings.
 fn star_settings(
     cfg: Res<AppConfig>,
-    theme: Res<Theme>,
     windows: Query<&Window, With<PrimaryWindow>>,
     handles: Res<SkyHandles>,
     mut stars: ResMut<Assets<StarMaterial>>,
-    mut suns: ResMut<Assets<SunMaterial>>,
-    mut coronas: ResMut<Assets<CoronaMaterial>>,
-    mut last: Local<Option<(bool, f32, [u8; 3])>>,
+    mut last: Local<Option<(bool, f32)>>,
 ) {
     let scale = windows.single().map(|w| w.scale_factor()).unwrap_or(1.0);
-    let key = (cfg.scene.reduced_motion, scale, cfg.appearance.accent);
+    let key = (cfg.scene.reduced_motion, scale);
     if *last == Some(key) {
         return;
     }
@@ -466,47 +306,5 @@ fn star_settings(
     let motion = if cfg.scene.reduced_motion { 0.0 } else { 1.0 };
     if let Some(mut m) = stars.get_mut(&handles.stars) {
         m.params = Vec4::new(motion, 1.0, scale, 0.0);
-    }
-    let (hot, cool) = sun_colors(&theme);
-    if let Some(mut m) = suns.get_mut(&handles.sun) {
-        m.misc.x = motion;
-        m.hot = hot.with_alpha(m.hot.alpha);
-        m.cool = cool.with_alpha(m.cool.alpha);
-    }
-    if let Some(mut m) = coronas.get_mut(&handles.corona) {
-        m.misc.x = motion;
-        m.inner = hot.with_alpha(m.inner.alpha);
-        m.outer = cool.with_alpha(m.outer.alpha);
-    }
-}
-
-/// The star brightens a little while an analysis runs. The materials are only
-/// written while the level ramps between its two values.
-fn star_activity(
-    time: Res<Time>,
-    hub: Res<Hub>,
-    cfg: Res<AppConfig>,
-    handles: Res<SkyHandles>,
-    mut suns: ResMut<Assets<SunMaterial>>,
-    mut coronas: ResMut<Assets<CoronaMaterial>>,
-    mut level: Local<f32>,
-) {
-    let busy = hub
-        .symbol(&cfg.active_symbol)
-        .is_some_and(|v| v.running.is_some());
-    let goal = if busy { 1.0 } else { 0.0 };
-    if (*level - goal).abs() < 1e-3 {
-        return;
-    }
-    let k = 1.0 - (-1.8 * time.delta_secs()).exp();
-    *level += (goal - *level) * k;
-    if (*level - goal).abs() < 2e-3 {
-        *level = goal;
-    }
-    if let Some(mut m) = suns.get_mut(&handles.sun) {
-        m.cool.alpha = *level;
-    }
-    if let Some(mut m) = coronas.get_mut(&handles.corona) {
-        m.outer.alpha = *level;
     }
 }
