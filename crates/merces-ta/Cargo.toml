@@ -1,0 +1,11 @@
+[package]
+name = "merces-ta"
+description = "Technical indicators and compact chart summaries for the Merces chart agent."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+merces-core.workspace = true
+serde.workspace = true

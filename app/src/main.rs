@@ -1,0 +1,62 @@
+//! Merces: a 3D dashboard of AI trading agents.
+//!
+//! Four agents (research → chart → decision → execution) orbit the active symbol;
+//! messages travel between them as light; click a planet to see its work and
+//! today's results. A separate assistant helps with the app and trading questions.
+
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Bevy systems take their dependencies as parameters.
+#![allow(clippy::too_many_arguments)]
+
+mod bridge;
+mod config;
+mod scene;
+mod state;
+mod theme;
+mod ui;
+
+use bevy::prelude::*;
+use bevy::window::{PresentMode, WindowResolution};
+use bevy_egui::EguiPlugin;
+
+fn main() {
+    let cfg = config::load();
+    let secrets = config::load_secrets();
+    let bridge = bridge::Bridge::start(&cfg, &secrets);
+    let theme = theme::Theme {
+        pal: theme::palette(&cfg.appearance, true),
+        scale: cfg.appearance.font_scale.clamp(0.8, 1.5),
+        os_dark: true,
+    };
+
+    App::new()
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Merces".into(),
+                        resolution: WindowResolution::new(1440, 900),
+                        present_mode: PresentMode::AutoVsync,
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(bevy::log::LogPlugin {
+                    filter: "wgpu=error,naga=warn,bevy_render=warn,merces=info".into(),
+                    ..default()
+                }),
+        )
+        .add_plugins((
+            MeshPickingPlugin,
+            EguiPlugin::default(),
+            bevy_framepace::FramepacePlugin,
+        ))
+        .insert_resource(cfg)
+        .insert_resource(secrets)
+        .insert_resource(bridge)
+        .insert_resource(theme)
+        .init_resource::<state::Hub>()
+        .add_systems(Update, bridge::pump)
+        .add_plugins((scene::ScenePlugin, ui::UiPlugin))
+        .run();
+}

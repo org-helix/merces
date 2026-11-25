@@ -1,0 +1,23 @@
+[package]
+name = "merces-agents"
+description = "The Merces agents (research, chart, decision, execution, assistant), their pipeline, scheduler and paper tracker."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+merces-core.workspace = true
+merces-ta.workspace = true
+merces-market.workspace = true
+merces-llm.workspace = true
+merces-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

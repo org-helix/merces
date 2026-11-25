@@ -1,0 +1,19 @@
+[package]
+name = "merces-market"
+description = "Market data for Merces: Binance (crypto), Twelve Data (forex, indices, metals), Alpaca (US stocks), Finnhub (news)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+merces-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

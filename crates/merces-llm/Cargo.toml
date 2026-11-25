@@ -1,0 +1,17 @@
+[package]
+name = "merces-llm"
+description = "Minimal streaming Claude Messages API client for Merces (raw HTTP, no official Rust SDK)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+merces-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
