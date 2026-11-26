@@ -212,6 +212,28 @@ fn advanced(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
             });
             ui.end_row();
 
+            row(
+                ui,
+                th,
+                t(lang, "Attraction du réseau", "Network attraction"),
+            );
+            ui.add(egui::Slider::new(&mut s.attraction, 0.0..=3.0).step_by(0.1))
+                .on_hover_text(t(
+                    lang,
+                    "Force qui rassemble les agents vers le centre. 0 : aucune.",
+                    "Force pulling the agents towards the centre. 0: none.",
+                ));
+            ui.end_row();
+
+            row(ui, th, t(lang, "Distance des liens", "Link distance"));
+            ui.add(egui::Slider::new(&mut s.link_distance, 3.0..=12.0).step_by(0.5))
+                .on_hover_text(t(
+                    lang,
+                    "Longueur de chaque lien : même espacement sur les trois axes.",
+                    "Length of every link: the same spacing along the three axes.",
+                ));
+            ui.end_row();
+
             row(ui, th, t(lang, "Mouvement réduit", "Reduced motion"));
             ui.checkbox(&mut s.reduced_motion, "").on_hover_text(t(
                 lang,

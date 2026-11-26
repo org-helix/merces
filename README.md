@@ -34,14 +34,14 @@ Les clés sont rangées dans le trousseau du système : Gestionnaire d'identific
 
 ## Utilisation
 
-- **Glisser** pour tourner (la rotation garde son élan au lâcher), **molette** pour zoomer. **Cliquer un agent** : il salue, la caméra vole vers lui, et son panneau s'ouvre. **Glisser un nœud** le déplace ; relâché, il revient en place comme sur un ressort. L'onglet « En direct » (activité, passages de relais, raisonnement en streaming) devient « Aujourd'hui » une fois l'analyse terminée (rapports du jour) ; l'onglet « Historique » liste tous ses résultats. **Échap** ou un clic dans le vide revient à la vue d'ensemble.
+- **Glisser** pour tourner (la rotation garde son élan au lâcher), **molette** pour zoomer. **Cliquer un agent** : il salue, la caméra vole vers lui, et son panneau s'ouvre. **Glisser un nœud** le déplace et le réseau se réarrange autour. Tous les liens ont la même longueur, donc l'espacement est le même sur les trois axes. L'attraction vers le centre et la distance des liens se règlent dans Réglages → Avancé. L'onglet « En direct » (activité, passages de relais, raisonnement en streaming) devient « Aujourd'hui » une fois l'analyse terminée (rapports du jour) ; l'onglet « Historique » liste tous ses résultats. **Échap** ou un clic dans le vide revient à la vue d'ensemble.
 - Les **badges** qui flottent à côté d'un agent sont ses résultats du jour, colorés selon l'issue ; le survol affiche le résumé, le clic ouvre le rapport.
 - Les agents s'animent selon leur état (veille, travail, terminé, « rien aujourd'hui », erreur) et réagissent : survol, clic, passage de relais (une enveloppe vole de l'un à l'autre), plan émis ou rejeté.
 - La **barre du haut** sert aussi de barre de titre : glisser pour déplacer la fenêtre, double-clic pour l'agrandir. Elle contient le symbole actif et son prix, le bouton d'analyse (l'heure de la prochaine analyse s'affiche au survol), **Symboles**, **Journal** et **Réglages**.
 - **Symboles** : recherche, ajout, heure d'analyse quotidienne (UTC), limites de risque par symbole.
 - **Journal** : signaux suivis sur papier, taux de réussite, résultat cumulé en R, export CSV.
 - **Réglages** :
-  - Apparence : thème sombre/clair/système, accent, police, taille du texte, qualité 3D (basse, moyenne, haute), langue FR/EN. Repliée sous « Avancé » : police des titres, FPS max, mouvement réduit, mode éco hors focus.
+  - Apparence : thème sombre/clair/système, accent, police, taille du texte, qualité 3D (basse, moyenne, haute), langue FR/EN. Repliée sous « Avancé » : police des titres, FPS max, attraction et distance des liens du réseau, mouvement réduit, mode éco hors focus.
   - Agents : modèle, effort et consignes de chaque agent, budget quotidien.
   - Données (clés, mode démo), Risque, À propos.
 
@@ -81,7 +81,7 @@ Les tests couvrent :
 - la base SQLite ;
 - le pipeline de bout en bout avec un LLM scripté (ordre 1→2→3→4, arrêt sur « ne rien faire ») ;
 - le contraste WCAG AA du thème ;
-- le réseau : il se stabilise près de sa forme de repos sans que les nœuds se touchent, un nœud relâché revient en place, et le mouvement réduit le fige.
+- le réseau : tous les liens à la même longueur, étalement équilibré sur les trois axes, attraction et distance réglables, un nœud relâché se réinsère, et le mouvement réduit le fige.
 
 ## Mesurer
 

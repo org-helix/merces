@@ -20,7 +20,11 @@ use super::{Layout, Selection};
 use crate::config::AppConfig;
 
 /// Distance of the overview (whole network in view).
-pub const OVERVIEW_DIST: f32 = 23.0;
+pub const OVERVIEW_DIST: f32 = 16.0;
+/// Default camera pitch (radians above the horizontal).
+pub const DEFAULT_PITCH: f32 = 0.45;
+/// Link length the overview distance is tuned for.
+const OVERVIEW_LINK: f32 = 5.5;
 /// Pitch limits (radians above the horizontal): the network reads from the
 /// front, slightly from above or below.
 const PITCH_MIN: f32 = -0.6;
@@ -53,7 +57,7 @@ impl Default for OrbitCam {
     fn default() -> Self {
         Self {
             yaw: 0.0,
-            pitch: 0.18,
+            pitch: DEFAULT_PITCH,
             dist: OVERVIEW_DIST,
             target: CENTER,
             goal_dist: OVERVIEW_DIST,
@@ -183,7 +187,7 @@ pub fn camera_control(
         cam.focus = next;
         cam.goal_dist = match next {
             Some(a) => (lay.sizes[a.index()] * 7.5).max(4.5),
-            None => OVERVIEW_DIST,
+            None => OVERVIEW_DIST * cfg.scene.link_distance.clamp(3.0, 12.0) / OVERVIEW_LINK,
         };
     }
 
