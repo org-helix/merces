@@ -1,4 +1,4 @@
-//! Side panel of a pipeline agent. Two tabs:
+//! What a pipeline agent did, shown in its fold of the left drawer. Two tabs:
 //! - "Live" while an analysis runs (timeline, streamed reasoning), which
 //!   becomes "Today" once it is over (today's results, then the last run's
 //!   timeline folded away);
@@ -29,112 +29,82 @@ pub fn status_chip(ui: &mut egui::Ui, th: &Theme, s: AgentStatus, lang: Lang) {
     theme::chip(ui, label, fg, th.pal.fill);
 }
 
-/// Returns the panel width in logical pixels.
-pub fn panel(
-    root: &mut egui::Ui,
+/// Content of an agent's fold in the left drawer: its role, then "Live"
+/// while an analysis runs (timeline, streamed reasoning), which becomes
+/// "Today" once it is over, and "History" (every result, all symbols).
+pub fn body(
+    ui: &mut egui::Ui,
     th: &Theme,
     cfg: &AppConfig,
     hub: &Hub,
     sel: &mut Selection,
     st: &mut UiState,
     agent: AgentId,
-) -> f32 {
+) {
     let lang = cfg.lang();
     let view = hub.symbol(&cfg.active_symbol);
     let running = view.is_some_and(|v| v.running.is_some());
-    let resp = egui::Panel::right("agent")
-        .default_size(440.0)
-        .size_range(360.0..=720.0)
-        .frame(
-            egui::Frame::new()
-                .fill(th.pal.panel)
-                .inner_margin(egui::Margin::same(20)),
-        )
-        .show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(theme::eyebrow(
-                    th,
-                    format!("Agent {} · {}", agent.index() + 1, cfg.active_symbol),
-                ));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::close_button(ui, th)
-                        .on_hover_text(t(lang, "Fermer (Échap)", "Close (Esc)"))
-                        .clicked()
-                    {
-                        sel.agent = None;
-                        sel.output = None;
-                    }
-                });
-            });
-            ui.label(theme::title(th, agent_name(agent, lang), 26.0));
-            ui.label(RichText::new(agent_role(agent, lang)).color(th.pal.body));
-            let av = view.map(|v| v.agent(agent).clone()).unwrap_or_default();
-            ui.horizontal(|ui| {
-                status_chip(ui, th, av.status, lang);
-                theme::chip(
-                    ui,
-                    cfg.engine.agent(agent).model.clone(),
-                    th.pal.muted,
-                    th.pal.fill,
-                );
-            });
-            ui.add_space(8.0);
-
-            if sel.output.is_some() {
-                st.agent_tab = AgentTab::Now;
+    let av = view.map(|v| v.agent(agent).clone()).unwrap_or_default();
+    ui.label(
+        RichText::new(agent_role(agent, lang))
+            .size(12.0 * th.scale)
+            .color(th.pal.muted),
+    );
+    let slot = agent.index().min(3);
+    if sel.output.is_some() && sel.agent == Some(agent) {
+        st.agent_tabs[slot] = AgentTab::Now;
+    }
+    ui.horizontal(|ui| {
+        let now = if running {
+            t(lang, "En direct", "Live")
+        } else {
+            t(lang, "Aujourd'hui", "Today")
+        };
+        for (tab, label) in [
+            (AgentTab::Now, now),
+            (AgentTab::History, t(lang, "Historique", "History")),
+        ] {
+            if ui
+                .selectable_label(st.agent_tabs[slot] == tab, label)
+                .clicked()
+            {
+                st.agent_tabs[slot] = tab;
+                sel.output = None;
             }
-            ui.horizontal(|ui| {
-                let now = if running {
-                    t(lang, "En direct", "Live")
-                } else {
-                    t(lang, "Aujourd'hui", "Today")
-                };
-                for (tab, label) in [
-                    (AgentTab::Now, now),
-                    (AgentTab::History, t(lang, "Historique", "History")),
-                ] {
-                    if ui.selectable_label(st.agent_tab == tab, label).clicked() {
-                        st.agent_tab = tab;
-                        sel.output = None;
-                    }
-                }
-            });
-            ui.separator();
-
-            match st.agent_tab {
-                AgentTab::Now if running => {
-                    ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .stick_to_bottom(true)
-                        .show(ui, |ui| {
-                            if let Some(v) = view {
-                                live(ui, th, v, &av, agent, lang);
-                            }
-                        });
-                }
-                AgentTab::Now => {
-                    ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            today(ui, th, hub, view, sel, agent, lang);
-                            if let Some(v) = view
-                                && !(av.activity.is_empty() && av.thinking.is_empty())
-                            {
-                                ui.add_space(4.0);
-                                egui::CollapsingHeader::new(t(
-                                    lang,
-                                    "Déroulé de la dernière analyse",
-                                    "How the last analysis went",
-                                ))
-                                .id_salt(("last-run", agent))
-                                .show(ui, |ui| live(ui, th, v, &av, agent, lang));
-                            }
-                        });
-                }
-                AgentTab::History => history(ui, th, hub, agent, lang),
-            }
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            theme::chip(
+                ui,
+                cfg.engine.agent(agent).model.clone(),
+                th.pal.muted,
+                th.pal.fill,
+            );
         });
-    resp.response.rect.width()
+    });
+    ui.separator();
+    match st.agent_tabs[slot] {
+        AgentTab::Now if running => {
+            if let Some(v) = view {
+                live(ui, th, v, &av, agent, lang);
+            }
+        }
+        AgentTab::Now => {
+            today(ui, th, hub, view, sel, agent, lang);
+            if let Some(v) = view
+                && !(av.activity.is_empty() && av.thinking.is_empty())
+            {
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new(t(
+                    lang,
+                    "Déroulé de la dernière analyse",
+                    "How the last analysis went",
+                ))
+                .id_salt(("last-run", agent))
+                .show(ui, |ui| live(ui, th, v, &av, agent, lang));
+            }
+        }
+        AgentTab::History => history(ui, th, hub, agent, lang),
+    }
 }
 
 /// Today's results of the agent, newest first.
@@ -295,7 +265,9 @@ fn history(ui: &mut egui::Ui, th: &Theme, hub: &Hub, agent: AgentId, lang: Lang)
     }
     let row_h = ui.text_style_height(&egui::TextStyle::Body) + ui.spacing().item_spacing.y;
     ScrollArea::vertical()
-        .auto_shrink([false, false])
+        .id_salt(("history", agent))
+        .max_height(320.0)
+        .auto_shrink([false, true])
         .show_rows(ui, row_h, all.len(), |ui, range| {
             for (s, o) in &all[range] {
                 ui.horizontal(|ui| {

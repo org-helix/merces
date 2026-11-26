@@ -59,8 +59,8 @@ fn row(ui: &mut egui::Ui, th: &Theme, label: &str) {
     ui.label(RichText::new(label).color(th.pal.body));
 }
 
-pub fn window(
-    ctx: &egui::Context,
+pub fn body(
+    ui: &mut egui::Ui,
     th: &Theme,
     cfg: &mut AppConfig,
     secrets: &mut Secrets,
@@ -68,46 +68,37 @@ pub fn window(
     bridge: &Bridge,
 ) {
     let lang = cfg.lang();
-    let mut open = st.settings;
-    egui::Window::new(t(lang, "Réglages", "Settings"))
-        .open(&mut open)
-        .default_width(600.0)
-        .resizable(false)
-        .default_pos(egui::pos2(300.0, 90.0))
-        .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for (tab, label) in [
-                    (SettingsTab::Appearance, t(lang, "Apparence", "Appearance")),
-                    (SettingsTab::Agents, t(lang, "Agents", "Agents")),
-                    (SettingsTab::Data, t(lang, "Données", "Data")),
-                    (SettingsTab::Risk, t(lang, "Risque", "Risk")),
-                    (SettingsTab::About, t(lang, "À propos", "About")),
-                ] {
-                    ui.selectable_value(&mut st.settings_tab, tab, label);
-                }
-            });
-            ui.separator();
-            // The short tabs fit as they are; the long ones scroll on small screens.
-            let room = (ctx.viewport_rect().height() - 220.0).max(240.0);
-            match st.settings_tab {
-                SettingsTab::Appearance => appearance(ui, th, cfg, lang),
-                SettingsTab::Risk => risk(ui, th, cfg, lang),
-                SettingsTab::About => about(ui, th, lang),
-                SettingsTab::Agents => {
-                    egui::ScrollArea::vertical()
-                        .max_height(room)
-                        .min_scrolled_height(room.min(420.0))
-                        .show(ui, |ui| agents(ui, th, cfg, lang));
-                }
-                SettingsTab::Data => {
-                    egui::ScrollArea::vertical()
-                        .max_height(room)
-                        .min_scrolled_height(room.min(420.0))
-                        .show(ui, |ui| data(ui, th, cfg, secrets, st, bridge, lang));
-                }
-            }
-        });
-    st.settings = open;
+    ui.horizontal_wrapped(|ui| {
+        for (tab, label) in [
+            (SettingsTab::Appearance, t(lang, "Apparence", "Appearance")),
+            (SettingsTab::Agents, t(lang, "Agents", "Agents")),
+            (SettingsTab::Data, t(lang, "Données", "Data")),
+            (SettingsTab::Risk, t(lang, "Risque", "Risk")),
+            (SettingsTab::About, t(lang, "À propos", "About")),
+        ] {
+            ui.selectable_value(&mut st.settings_tab, tab, label);
+        }
+    });
+    ui.separator();
+    // The short tabs fit as they are; the long ones scroll on small screens.
+    let room = (ui.ctx().viewport_rect().height() - 260.0).max(240.0);
+    match st.settings_tab {
+        SettingsTab::Appearance => appearance(ui, th, cfg, lang),
+        SettingsTab::Risk => risk(ui, th, cfg, lang),
+        SettingsTab::About => about(ui, th, lang),
+        SettingsTab::Agents => {
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .min_scrolled_height(room.min(420.0))
+                .show(ui, |ui| agents(ui, th, cfg, lang));
+        }
+        SettingsTab::Data => {
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .min_scrolled_height(room.min(420.0))
+                .show(ui, |ui| data(ui, th, cfg, secrets, st, bridge, lang));
+        }
+    }
 }
 
 fn appearance(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {

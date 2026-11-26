@@ -5,6 +5,9 @@
 mod agent;
 mod assistant;
 mod cards;
+mod docks;
+
+pub use docks::Section;
 mod journal;
 mod md;
 mod overlay;
@@ -55,13 +58,19 @@ pub enum AgentTab {
     History,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct UiState {
-    pub settings: bool,
     pub settings_tab: SettingsTab,
-    pub symbols: bool,
-    pub journal: bool,
-    pub agent_tab: AgentTab,
+    /// Tab of each pipeline agent's fold.
+    pub agent_tabs: [AgentTab; 4],
+    /// Left drawer (analyses) rolled out.
+    pub left_open: bool,
+    /// Right drawer (signals, assistant, symbols, settings) rolled out.
+    pub right_open: bool,
+    /// Section to unfold on the next frame.
+    pub request: Option<docks::Section>,
+    /// Agent selection seen last frame (a new one unfolds its section).
+    pub last_selected: Option<AgentId>,
     pub chat_input: String,
     pub search: String,
     pub search_rx: Option<Receiver<Vec<SymbolInfo>>>,
@@ -74,6 +83,30 @@ pub struct UiState {
     saved: Option<AppConfig>,
     /// Fonts set with `set_fonts` only apply from the next frame.
     fonts_ready: bool,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            settings_tab: SettingsTab::default(),
+            agent_tabs: [AgentTab::default(); 4],
+            left_open: true,
+            right_open: true,
+            request: None,
+            last_selected: None,
+            chat_input: String::new(),
+            search: String::new(),
+            search_rx: None,
+            search_results: Vec::new(),
+            manual: merces_core::SymbolConfig::default(),
+            draft_secrets: None,
+            show_keys: false,
+            journal_symbol: String::new(),
+            status_line: String::new(),
+            saved: None,
+            fonts_ready: false,
+        }
+    }
 }
 
 /// French / English text.
@@ -209,13 +242,18 @@ fn ui_main(
 
     topbar::top(root, th, &mut draft, &mut hub, st, &bridge, &mut win);
 
-    sel.panel_px = match sel.agent {
-        Some(AgentId::Assistant) => {
-            assistant::panel(root, th, &draft, &mut hub, &mut sel, st, &bridge)
-        }
-        Some(agent) => agent::panel(root, th, &draft, &hub, &mut sel, st, agent),
-        None => 0.0,
-    };
+    let (left_w, right_w) = docks::show(
+        root,
+        th,
+        &mut draft,
+        &mut hub,
+        &mut sel,
+        &mut secrets,
+        st,
+        &bridge,
+    );
+    // The camera keeps a focused agent in the middle of what the drawers leave visible.
+    sel.panel_px = right_w - left_w;
     if let Ok((cam, gt)) = cams.single() {
         overlay::labels(&ctx, th, &draft, &hub, &sel, &lay, cam, gt);
     }
@@ -223,15 +261,6 @@ fn ui_main(
     overlay::proposals(&ctx, th, &mut draft, &mut hub, &bridge);
     overlay::welcome(&ctx, th, &mut draft);
 
-    if st.symbols {
-        symbols::window(&ctx, th, &mut draft, &hub, st, &bridge);
-    }
-    if st.journal {
-        journal::window(&ctx, th, &draft, &hub, st);
-    }
-    if st.settings {
-        settings::window(&ctx, th, &mut draft, &mut secrets, st, &bridge);
-    }
     titlebar::frame(&ctx, th, &mut win);
 
     if draft != *cfg {

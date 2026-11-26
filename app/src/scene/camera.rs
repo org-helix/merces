@@ -198,7 +198,7 @@ pub fn camera_control(
 
     // Keep a focused agent left of the side panel.
     let side_goal = match (cam.focus, proj, windows.single()) {
-        (Some(_), Projection::Perspective(p), Ok(w)) if sel.panel_px > 0.0 => {
+        (_, Projection::Perspective(p), Ok(w)) if sel.panel_px != 0.0 => {
             let half_w = (p.fov * 0.5).tan() * cam.dist * w.width() / w.height().max(1.0);
             half_w * (sel.panel_px / w.width().max(1.0))
         }

@@ -159,9 +159,9 @@ fn shoot(
                 sel.agent = shot.agent;
             }
             match shot.window.as_deref() {
-                Some("settings") => ui.settings = true,
-                Some("symbols") => ui.symbols = true,
-                Some("journal") => ui.journal = true,
+                Some("settings") => ui.open_section(crate::ui::Section::Settings),
+                Some("symbols") => ui.open_section(crate::ui::Section::Symbols),
+                Some("journal") => ui.open_section(crate::ui::Section::Signals),
                 _ => {}
             }
             shot.step = 2;

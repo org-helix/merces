@@ -66,7 +66,8 @@ pub struct Selection {
     pub badge: Option<(AgentId, usize)>,
     /// Badge clicked: index into that agent's results of the day.
     pub output: Option<usize>,
-    /// Right panel width in logical pixels (0 when closed), set by the UI.
+    /// Right drawer width minus left drawer width, in logical pixels, set by
+    /// the UI: the camera shifts so the focus stays centred in the free space.
     pub panel_px: f32,
     /// A node is being dragged.
     pub dragging: bool,

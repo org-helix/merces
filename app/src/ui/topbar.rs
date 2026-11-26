@@ -120,18 +120,13 @@ fn bar_content(
     }
 
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        for (open, label) in [
-            (&mut st.settings, t(lang, "Réglages", "Settings")),
-            (&mut st.journal, t(lang, "Journal", "Journal")),
-            (&mut st.symbols, t(lang, "Symboles", "Symbols")),
+        for (section, label) in [
+            (super::docks::Section::Settings, t(lang, "Réglages", "Settings")),
+            (super::docks::Section::Signals, t(lang, "Signaux", "Signals")),
+            (super::docks::Section::Symbols, t(lang, "Symboles", "Symbols")),
         ] {
-            let text = if *open {
-                RichText::new(label).color(th.pal.text).underline()
-            } else {
-                RichText::new(label).color(th.pal.body)
-            };
-            if theme::ghost_button(ui, text).clicked() {
-                *open = !*open;
+            if theme::ghost_button(ui, RichText::new(label).color(th.pal.body)).clicked() {
+                st.open_section(section);
             }
         }
         ui.add_space(8.0);
@@ -158,8 +153,8 @@ fn bar_content(
                             "Add your Anthropic key (Settings → Data) or turn on demo mode.",
                         ),
                     );
-                    st.settings = true;
                     st.settings_tab = super::SettingsTab::Data;
+                    st.open_section(super::docks::Section::Settings);
                 } else if !current.is_empty() {
                     bridge.send(Command::Run(current.clone()));
                 }

@@ -385,8 +385,9 @@ pub fn ghost_button(ui: &mut Ui, text: impl Into<RichText>) -> Response {
     )
 }
 
-/// Close button of a panel: a drawn ✕ (the text fonts have no such glyph).
-pub fn close_button(ui: &mut Ui, theme: &Theme) -> Response {
+/// Drawer roll button: a drawn chevron pointing left or right (drawn, so it
+/// never depends on the font having the glyph).
+pub fn chevron_button(ui: &mut Ui, theme: &Theme, points_left: bool) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), egui::Sense::click());
     if resp.hovered() {
         ui.painter()
@@ -398,11 +399,14 @@ pub fn close_button(ui: &mut Ui, theme: &Theme) -> Response {
         theme.pal.muted
     };
     let m = rect.center();
-    let st = Stroke::new(1.3, c);
-    ui.painter()
-        .line_segment([m + vec2(-5.0, -5.0), m + vec2(5.0, 5.0)], st);
-    ui.painter()
-        .line_segment([m + vec2(-5.0, 5.0), m + vec2(5.0, -5.0)], st);
+    let d = if points_left { -1.0 } else { 1.0 };
+    let st = Stroke::new(1.6, c);
+    for dx in [-3.0, 3.0] {
+        let tip = m + vec2(dx + 3.0 * d, 0.0);
+        let tail = m + vec2(dx - 3.0 * d, 0.0);
+        ui.painter().line_segment([tail + vec2(0.0, -5.0), tip], st);
+        ui.painter().line_segment([tail + vec2(0.0, 5.0), tip], st);
+    }
     resp
 }
 
