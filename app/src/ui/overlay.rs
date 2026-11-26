@@ -36,7 +36,7 @@ pub fn labels(
             .ok()
             .map(|v| Pos2::new(v.x / scale, v.y / scale))
     };
-    // The name of the agent under the pointer, unless its panel is open.
+    // The name of the agent under the pointer, unless it is the one in focus.
     if let Some(a) = sel.hovered.filter(|a| sel.agent != Some(*a)) {
         let i = a.index();
         if let Some(at) = project(lay.agents[i] - Vec3::Y * (lay.sizes[i] + 0.2)) {

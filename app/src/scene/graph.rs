@@ -7,10 +7,13 @@
 //! (data → research → chart → decision → execution) is drawn stronger: it is the
 //! path the hand-offs travel on.
 //!
-//! Nodes are held by springs (towards their rest place, along the edges, apart
-//! from each other) and drift slowly, so the graph breathes like a live network.
-//! A node can be dragged; released, it springs back with its momentum. The
-//! simulation runs in fixed sub-steps: the same motion at any frame rate.
+//! The layout is a 3D force simulation: every link is a spring with the same
+//! rest length, every pair of nodes repels, and an attraction pulls everything
+//! towards the centre. Linked nodes therefore sit at the same distance along
+//! the three axes. The link length and the attraction are set in Settings →
+//! Advanced. Nodes drift slowly, so the graph breathes like a live network; a
+//! node can be dragged and the network rearranges around it. The simulation
+//! runs in fixed sub-steps: the same motion at any frame rate.
 
 // The nodes live in parallel fixed arrays (positions, velocities, forces).
 #![allow(clippy::needless_range_loop)]
@@ -30,50 +33,6 @@ use crate::theme::{self, Theme};
 pub const INPUT: usize = 5;
 const NODES: usize = 6;
 
-/// Rest positions: the chain left to right with some depth, the assistant above.
-const HOME: [Vec3; NODES] = [
-    Vec3::new(-6.0, 1.8, 1.0),   // research
-    Vec3::new(-1.0, -1.6, -0.6), // chart
-    Vec3::new(4.5, 1.4, 0.6),    // decision
-    Vec3::new(10.0, -0.4, -0.4), // execution
-    Vec3::new(-1.0, 6.2, -4.0),  // assistant
-    Vec3::new(-12.0, 0.0, 0.0),  // input
-];
-
-/// Centre of the graph, looked at in the overview.
-pub const CENTER: Vec3 = Vec3::new(-0.8, 1.2, 0.0);
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum EdgeKind {
-    /// The hand-off chain.
-    Chain,
-    /// Other data the agent receives.
-    Data,
-    /// The assistant reads the agents' work.
-    Assistant,
-}
-
-pub const EDGES: [(usize, usize, EdgeKind); 11] = [
-    (INPUT, 0, EdgeKind::Chain),
-    (0, 1, EdgeKind::Chain),
-    (1, 2, EdgeKind::Chain),
-    (2, 3, EdgeKind::Chain),
-    (INPUT, 1, EdgeKind::Data),
-    (0, 2, EdgeKind::Data),
-    (1, 3, EdgeKind::Data),
-    (4, 0, EdgeKind::Assistant),
-    (4, 1, EdgeKind::Assistant),
-    (4, 2, EdgeKind::Assistant),
-    (4, 3, EdgeKind::Assistant),
-];
-
-const SUBSTEP: f32 = 1.0 / 120.0;
-const K_HOME: f32 = 5.0;
-const K_EDGE: f32 = 3.0;
-const K_REPEL: f32 = 18.0;
-const MIN_GAP: f32 = 2.6;
-const DAMPING: f32 = 4.5;
-const DRIFT: f32 = 0.35;
 const INPUT_RADIUS: f32 = 0.55;
 /// Pixel size of the input node.
 const INPUT_PX: f32 = 0.1;
@@ -110,6 +69,128 @@ fn pixel_ring() -> super::voxel::Model {
     m
 }
 
+/// Centre of the graph: the attraction pulls towards it, the overview looks at it.
+pub const CENTER: Vec3 = Vec3::new(0.0, 0.8, 0.0);
+
+/// The ideal layout, in link lengths, centred on the origin: every link has
+/// exactly unit length. Research, chart and decision form a triangle; the
+/// assistant and execution each sit on one side of it (two regular
+/// tetrahedra sharing a face); the input node hangs off research and chart,
+/// as far as possible from the others. Rotated so the flow reads left to
+/// right (input → execution).
+pub fn ideal() -> [Vec3; NODES] {
+    static IDEAL: std::sync::OnceLock<[Vec3; NODES]> = std::sync::OnceLock::new();
+    *IDEAL.get_or_init(compute_ideal)
+}
+
+fn compute_ideal() -> [Vec3; NODES] {
+    let h = (2.0f32 / 3.0).sqrt();
+    let r = Vec3::ZERO;
+    let c = Vec3::X;
+    let d = Vec3::new(0.5, 3f32.sqrt() / 2.0, 0.0);
+    let a = Vec3::new(0.5, 3f32.sqrt() / 6.0, h);
+    // Execution: research mirrored through the chart–decision–assistant face.
+    let e = (c + d + a) * (2.0 / 3.0) - r;
+    // Input: on the unit circle around the research–chart axis, in the middle
+    // of the arc that stays at least one link away from decision and assistant.
+    let rad = 3f32.sqrt() / 2.0;
+    let ang = 215f32.to_radians();
+    let i = Vec3::new(0.5, rad * ang.cos(), rad * ang.sin());
+    let mut p = [r, c, d, e, a, i];
+    let mid = p.iter().copied().sum::<Vec3>() / NODES as f32;
+    let turn = Quat::from_rotation_arc((e - i).normalize(), Vec3::X);
+    for q in &mut p {
+        *q = turn * (*q - mid);
+    }
+    // Roll around the reading axis so the assistant floats on top.
+    let up = p[4];
+    let roll = Quat::from_rotation_x(-up.z.atan2(up.y));
+    for q in &mut p {
+        *q = roll * *q;
+    }
+    // Turn around the vertical (within ±40°, keeping the reading direction)
+    // to the angle where the nodes are best apart on screen, seen from the
+    // default camera (front, slightly above).
+    let (sp, cp) = super::camera::DEFAULT_PITCH.sin_cos();
+    let view = |q: Vec3| Vec2::new(q.x, q.y * cp - q.z * sp);
+    let spread = |yaw: f32| {
+        let t = Quat::from_rotation_y(yaw);
+        let s: Vec<Vec2> = p.iter().map(|q| view(t * *q)).collect();
+        let mut min = f32::MAX;
+        for a in 0..NODES {
+            for b in a + 1..NODES {
+                min = min.min(s[a].distance(s[b]));
+            }
+        }
+        min
+    };
+    let best = (-50..=50)
+        .map(|d| (d as f32).to_radians())
+        .max_by(|a, b| spread(*a).total_cmp(&spread(*b)))
+        .unwrap_or(0.0);
+    let t = Quat::from_rotation_y(best);
+    p.map(|q| t * q)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EdgeKind {
+    /// The hand-off chain.
+    Chain,
+    /// Other data the agent receives.
+    Data,
+    /// The assistant reads the agents' work.
+    Assistant,
+}
+
+pub const EDGES: [(usize, usize, EdgeKind); 11] = [
+    (INPUT, 0, EdgeKind::Chain),
+    (0, 1, EdgeKind::Chain),
+    (1, 2, EdgeKind::Chain),
+    (2, 3, EdgeKind::Chain),
+    (INPUT, 1, EdgeKind::Data),
+    (0, 2, EdgeKind::Data),
+    (1, 3, EdgeKind::Data),
+    (4, 0, EdgeKind::Assistant),
+    (4, 1, EdgeKind::Assistant),
+    (4, 2, EdgeKind::Assistant),
+    (4, 3, EdgeKind::Assistant),
+];
+
+const SUBSTEP: f32 = 1.0 / 120.0;
+/// Stiffness of a link (every link has the same rest length).
+const K_LINK: f32 = 6.0;
+/// Stiffness of the push between nodes closer than [`GAP`] link lengths,
+/// relative to a link.
+const K_REPEL: f32 = 1.0;
+/// Closest two nodes may come, in link lengths.
+const GAP: f32 = 1.0;
+/// Strength of the attraction towards the centre, at attraction 1.
+const K_CENTER: f32 = 0.5;
+/// Weak pull that keeps the reading direction (x only).
+const K_RANK: f32 = 0.1;
+const DAMPING: f32 = 2.5;
+/// Amplitude of the slow wander, as a force.
+const DRIFT: f32 = 0.5;
+
+/// The layout forces the user can tune (Settings → Advanced).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Forces {
+    /// Pull of every node towards the centre (0 = none, 1 = default).
+    pub attraction: f32,
+    /// Rest length of every link: the spacing between linked nodes, the same
+    /// along the three axes.
+    pub distance: f32,
+}
+
+impl Default for Forces {
+    fn default() -> Self {
+        Self {
+            attraction: 1.0,
+            distance: 5.5,
+        }
+    }
+}
+
 /// Positions and velocities of the nodes, and the node being dragged.
 #[derive(Resource)]
 pub struct Net {
@@ -123,8 +204,10 @@ pub struct Net {
 
 impl Default for Net {
     fn default() -> Self {
+        let l = Forces::default().distance;
+        let pos = ideal().map(|p| CENTER + p * l);
         Self {
-            pos: HOME,
+            pos,
             vel: [Vec3::ZERO; NODES],
             grab: None,
             t: 0.0,
@@ -134,52 +217,58 @@ impl Default for Net {
 }
 
 impl Net {
-    /// Slow, smooth wander around the rest place (sum of incommensurate sines).
+    /// Slow, smooth wander (sum of incommensurate sines), as a small force.
     fn drift(i: usize, t: f32) -> Vec3 {
         let p = i as f32 * 1.7;
         Vec3::new(
             (t * 0.21 + p).sin() + 0.5 * (t * 0.37 + p * 2.1).sin(),
             (t * 0.17 + p * 1.3).sin() + 0.4 * (t * 0.29 + p).sin(),
-            (t * 0.13 + p * 0.7).sin(),
+            (t * 0.13 + p * 0.7).sin() + 0.5 * (t * 0.31 + p * 1.1).sin(),
         ) * (DRIFT / 1.5)
     }
 
-    /// One fixed simulation step.
-    fn step(&mut self, dt: f32, calm: bool) {
+    /// One fixed simulation step of the force layout.
+    fn step(&mut self, dt: f32, calm: bool, f: Forces) {
         if !calm {
             self.t += dt;
         }
+        let l = f.distance.max(1.0);
+        let rest = ideal();
         let mut force = [Vec3::ZERO; NODES];
-        for i in 0..NODES {
-            let rest = if calm {
-                HOME[i]
-            } else {
-                HOME[i] + Self::drift(i, self.t)
-            };
-            force[i] += (rest - self.pos[i]) * K_HOME;
-        }
+        // Links: springs, all with the same rest length.
         for (a, b, kind) in EDGES {
-            let k = match kind {
-                EdgeKind::Chain => K_EDGE,
-                EdgeKind::Data => K_EDGE * 0.5,
-                EdgeKind::Assistant => K_EDGE * 0.15,
+            let k = if kind == EdgeKind::Assistant {
+                K_LINK * 0.8
+            } else {
+                K_LINK
             };
             let d = self.pos[b] - self.pos[a];
             let len = d.length().max(1e-4);
-            let rest = HOME[a].distance(HOME[b]);
-            let f = d / len * (len - rest) * k;
-            force[a] += f;
-            force[b] -= f;
+            let pull = d / len * (len - l) * k;
+            force[a] += pull;
+            force[b] -= pull;
         }
+        // Every pair closer than a link length is pushed apart: no node comes
+        // nearer than the link distance, whether linked or not.
         for a in 0..NODES {
             for b in a + 1..NODES {
                 let d = self.pos[b] - self.pos[a];
-                let len = d.length().max(1e-4);
-                if len < MIN_GAP {
-                    let f = d / len * (MIN_GAP - len) * K_REPEL;
-                    force[a] -= f;
-                    force[b] += f;
+                let len = d.length().max(1e-3);
+                let gap = l * GAP - len;
+                if gap > 0.0 {
+                    let push = d / len * gap * K_REPEL * K_LINK;
+                    force[a] -= push;
+                    force[b] += push;
                 }
+            }
+        }
+        for i in 0..NODES {
+            // Attraction towards the centre.
+            force[i] += (CENTER - self.pos[i]) * K_CENTER * f.attraction.max(0.0);
+            // Keep the reading direction (x only).
+            force[i].x += (CENTER.x + rest[i].x * l - self.pos[i].x) * K_RANK;
+            if !calm {
+                force[i] += Self::drift(i, self.t);
             }
         }
         let decay = (-DAMPING * dt).exp();
@@ -263,7 +352,7 @@ fn setup(
         .spawn((
             Mesh3d(meshes.add(pixel_ball().mesh(INPUT_PX, Vec3::splat(0.0)))),
             MeshMaterial3d(input_mat.clone()),
-            Transform::from_translation(HOME[INPUT]),
+            Transform::from_translation(Net::default().pos[INPUT]),
             InputNode(input_mat),
             Name::new("input"),
         ))
@@ -335,10 +424,14 @@ fn simulate(
     mut input: Query<&mut Transform, With<InputNode>>,
 ) {
     let calm = cfg.scene.reduced_motion;
+    let forces = Forces {
+        attraction: cfg.scene.attraction.clamp(0.0, 3.0),
+        distance: cfg.scene.link_distance.clamp(3.0, 12.0),
+    };
     net.acc += time.delta_secs().min(0.1);
     while net.acc >= SUBSTEP {
         net.acc -= SUBSTEP;
-        net.step(SUBSTEP, calm);
+        net.step(SUBSTEP, calm, forces);
     }
     let t = net.t;
     for (c, mut tf) in &mut chars {
@@ -556,54 +649,146 @@ pub fn drag_end(_: On<PointerDragEnd>, mut net: ResMut<Net>, mut sel: ResMut<Sel
 mod tests {
     use super::*;
 
-    #[test]
-    fn settles_near_home_and_apart() {
-        let mut n = Net::default();
-        for _ in 0..(120 * 20) {
-            n.step(SUBSTEP, false);
+    fn settle(n: &mut Net, f: Forces, seconds: f32, calm: bool) {
+        for _ in 0..(seconds / SUBSTEP) as usize {
+            n.step(SUBSTEP, calm, f);
         }
-        for i in 0..NODES {
+    }
+
+    fn edge_lengths(n: &Net) -> Vec<f32> {
+        EDGES
+            .iter()
+            .map(|(a, b, _)| n.pos[*a].distance(n.pos[*b]))
+            .collect()
+    }
+
+    fn mean_to_center(n: &Net) -> f32 {
+        n.pos.iter().map(|p| p.distance(CENTER)).sum::<f32>() / NODES as f32
+    }
+
+    #[test]
+    fn linked_nodes_sit_at_the_link_distance() {
+        let f = Forces::default();
+        let mut n = Net::default();
+        settle(&mut n, f, 30.0, true);
+        let l = f.distance;
+        for (len, (a, b, _)) in edge_lengths(&n).iter().zip(EDGES) {
             assert!(
-                n.pos[i].distance(HOME[i]) < 1.5,
-                "node {i} drifted to {:?}",
-                n.pos[i]
+                (len / l - 1.0).abs() < 0.3,
+                "link {a}-{b} is {len:.2}, expected about {l}"
             );
-            for j in i + 1..NODES {
-                assert!(
-                    n.pos[i].distance(n.pos[j]) > 2.0,
-                    "nodes {i} and {j} too close"
-                );
+        }
+        for a in 0..NODES {
+            for b in a + 1..NODES {
+                let d = n.pos[a].distance(n.pos[b]);
+                assert!(d > 0.9 * l, "nodes {a} and {b} too close: {d:.2}");
             }
         }
     }
 
     #[test]
-    fn released_node_springs_back() {
-        let mut n = Net {
-            grab: Some((2, HOME[2] + Vec3::new(0.0, 6.0, 0.0))),
+    fn spreads_evenly_in_three_dimensions() {
+        let f = Forces::default();
+        let mut n = Net::default();
+        settle(&mut n, f, 30.0, true);
+        let min = n.pos.iter().fold(Vec3::INFINITY, |m, p| m.min(*p));
+        let max = n.pos.iter().fold(Vec3::NEG_INFINITY, |m, p| m.max(*p));
+        let extent = max - min;
+        for (axis, e) in ["x", "y", "z"].iter().zip(extent.to_array()) {
+            assert!(e > 0.7 * f.distance, "flat along {axis}: {extent:?}");
+        }
+        assert!(
+            extent.max_element() / extent.min_element() < 2.5,
+            "uneven spread: {extent:?}"
+        );
+    }
+
+    #[test]
+    fn attraction_and_distance_are_tunable() {
+        let mut loose = Net::default();
+        settle(
+            &mut loose,
+            Forces {
+                attraction: 0.0,
+                ..Default::default()
+            },
+            30.0,
+            true,
+        );
+        let mut tight = Net::default();
+        settle(
+            &mut tight,
+            Forces {
+                attraction: 3.0,
+                ..Default::default()
+            },
+            30.0,
+            true,
+        );
+        assert!(mean_to_center(&tight) < mean_to_center(&loose) * 0.95);
+
+        let f = Forces {
+            distance: 9.0,
             ..Default::default()
         };
-        for _ in 0..30 {
-            n.step(SUBSTEP, true);
-        }
-        assert!(n.pos[2].distance(HOME[2]) > 5.0);
+        let mut wide = Net::default();
+        settle(&mut wide, f, 40.0, true);
+        let lens = edge_lengths(&wide);
+        let mean = lens.iter().sum::<f32>() / lens.len() as f32;
+        assert!((mean / 9.0 - 1.0).abs() < 0.1, "mean link {mean:.2}");
+    }
+
+    #[test]
+    fn released_node_rejoins_the_network() {
+        let f = Forces::default();
+        let mut n = Net::default();
+        settle(&mut n, f, 20.0, true);
+        let far = n.pos[2] + Vec3::new(0.0, 12.0, 0.0);
+        n.grab = Some((2, far));
+        settle(&mut n, f, 0.5, true);
+        assert!(
+            n.pos[2].distance(far) < 1e-3,
+            "the grabbed node follows the pointer"
+        );
         n.grab = None;
-        for _ in 0..(120 * 6) {
-            n.step(SUBSTEP, true);
+        settle(&mut n, f, 20.0, true);
+        for len in edge_lengths(&n) {
+            assert!((len / f.distance - 1.0).abs() < 0.3, "{len:.2}");
         }
-        assert!(n.pos[2].distance(HOME[2]) < 0.2, "{:?}", n.pos[2]);
     }
 
     #[test]
     fn calm_graph_is_still() {
+        let f = Forces::default();
         let mut n = Net::default();
-        for _ in 0..240 {
-            n.step(SUBSTEP, true);
-        }
+        settle(&mut n, f, 90.0, true);
         let before = n.pos;
-        n.step(SUBSTEP, true);
+        n.step(SUBSTEP, true, f);
         for i in 0..NODES {
-            assert!(n.pos[i].distance(before[i]) < 1e-4);
+            assert!(n.pos[i].distance(before[i]) < 1e-3);
+        }
+    }
+
+    #[test]
+    fn assistant_floats_on_top_and_flow_reads_left_to_right() {
+        let p = ideal();
+        let top = p.iter().map(|q| q.y).fold(f32::MIN, f32::max);
+        assert_eq!(p[4].y, top, "the assistant is the highest node");
+        // Seen from the default camera, no two nodes overlap.
+        for a in 0..NODES {
+            for b in a + 1..NODES {
+                let (sp, cp) = super::super::camera::DEFAULT_PITCH.sin_cos();
+                let at = |q: Vec3| Vec2::new(q.x, q.y * cp - q.z * sp);
+                let d = at(p[a]).distance(at(p[b]));
+                assert!(d > 0.45, "nodes {a} and {b} overlap on screen: {d:.2}");
+            }
+        }
+        assert!(
+            p[INPUT].x < p[0].x && p[0].x < p[3].x,
+            "input → research → execution"
+        );
+        for (a, b, _) in EDGES {
+            assert!((p[a].distance(p[b]) - 1.0).abs() < 1e-4, "link {a}-{b}");
         }
     }
 

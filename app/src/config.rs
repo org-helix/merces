@@ -79,6 +79,10 @@ pub struct SceneSettings {
     pub quality: Quality,
     /// 0 = follow the display (vsync).
     pub fps_cap: u32,
+    /// Pull of the network towards its centre (1 = default).
+    pub attraction: f32,
+    /// Length of every link of the network, in world units.
+    pub link_distance: f32,
     /// Drop to 15 fps when the window is not focused.
     pub eco_unfocused: bool,
     /// Freeze the network and keep only the essential animations.
@@ -90,6 +94,8 @@ impl Default for SceneSettings {
         Self {
             quality: Quality::Medium,
             fps_cap: 0,
+            attraction: 1.0,
+            link_distance: 5.5,
             eco_unfocused: true,
             reduced_motion: false,
         }

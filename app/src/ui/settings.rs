@@ -59,8 +59,8 @@ fn row(ui: &mut egui::Ui, th: &Theme, label: &str) {
     ui.label(RichText::new(label).color(th.pal.body));
 }
 
-pub fn window(
-    ctx: &egui::Context,
+pub fn body(
+    ui: &mut egui::Ui,
     th: &Theme,
     cfg: &mut AppConfig,
     secrets: &mut Secrets,
@@ -68,46 +68,37 @@ pub fn window(
     bridge: &Bridge,
 ) {
     let lang = cfg.lang();
-    let mut open = st.settings;
-    egui::Window::new(t(lang, "Réglages", "Settings"))
-        .open(&mut open)
-        .default_width(600.0)
-        .resizable(false)
-        .default_pos(egui::pos2(300.0, 90.0))
-        .show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                for (tab, label) in [
-                    (SettingsTab::Appearance, t(lang, "Apparence", "Appearance")),
-                    (SettingsTab::Agents, t(lang, "Agents", "Agents")),
-                    (SettingsTab::Data, t(lang, "Données", "Data")),
-                    (SettingsTab::Risk, t(lang, "Risque", "Risk")),
-                    (SettingsTab::About, t(lang, "À propos", "About")),
-                ] {
-                    ui.selectable_value(&mut st.settings_tab, tab, label);
-                }
-            });
-            ui.separator();
-            // The short tabs fit as they are; the long ones scroll on small screens.
-            let room = (ctx.viewport_rect().height() - 220.0).max(240.0);
-            match st.settings_tab {
-                SettingsTab::Appearance => appearance(ui, th, cfg, lang),
-                SettingsTab::Risk => risk(ui, th, cfg, lang),
-                SettingsTab::About => about(ui, th, lang),
-                SettingsTab::Agents => {
-                    egui::ScrollArea::vertical()
-                        .max_height(room)
-                        .min_scrolled_height(room.min(420.0))
-                        .show(ui, |ui| agents(ui, th, cfg, lang));
-                }
-                SettingsTab::Data => {
-                    egui::ScrollArea::vertical()
-                        .max_height(room)
-                        .min_scrolled_height(room.min(420.0))
-                        .show(ui, |ui| data(ui, th, cfg, secrets, st, bridge, lang));
-                }
-            }
-        });
-    st.settings = open;
+    ui.horizontal_wrapped(|ui| {
+        for (tab, label) in [
+            (SettingsTab::Appearance, t(lang, "Apparence", "Appearance")),
+            (SettingsTab::Agents, t(lang, "Agents", "Agents")),
+            (SettingsTab::Data, t(lang, "Données", "Data")),
+            (SettingsTab::Risk, t(lang, "Risque", "Risk")),
+            (SettingsTab::About, t(lang, "À propos", "About")),
+        ] {
+            ui.selectable_value(&mut st.settings_tab, tab, label);
+        }
+    });
+    ui.separator();
+    // The short tabs fit as they are; the long ones scroll on small screens.
+    let room = (ui.ctx().viewport_rect().height() - 260.0).max(240.0);
+    match st.settings_tab {
+        SettingsTab::Appearance => appearance(ui, th, cfg, lang),
+        SettingsTab::Risk => risk(ui, th, cfg, lang),
+        SettingsTab::About => about(ui, th, lang),
+        SettingsTab::Agents => {
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .min_scrolled_height(room.min(420.0))
+                .show(ui, |ui| agents(ui, th, cfg, lang));
+        }
+        SettingsTab::Data => {
+            egui::ScrollArea::vertical()
+                .max_height(room)
+                .min_scrolled_height(room.min(420.0))
+                .show(ui, |ui| data(ui, th, cfg, secrets, st, bridge, lang));
+        }
+    }
 }
 
 fn appearance(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
@@ -210,6 +201,28 @@ fn advanced(ui: &mut egui::Ui, th: &Theme, cfg: &mut AppConfig, lang: Lang) {
                     ui.selectable_value(&mut s.fps_cap, v, label);
                 }
             });
+            ui.end_row();
+
+            row(
+                ui,
+                th,
+                t(lang, "Attraction du réseau", "Network attraction"),
+            );
+            ui.add(egui::Slider::new(&mut s.attraction, 0.0..=3.0).step_by(0.1))
+                .on_hover_text(t(
+                    lang,
+                    "Force qui rassemble les agents vers le centre. 0 : aucune.",
+                    "Force pulling the agents towards the centre. 0: none.",
+                ));
+            ui.end_row();
+
+            row(ui, th, t(lang, "Distance des liens", "Link distance"));
+            ui.add(egui::Slider::new(&mut s.link_distance, 3.0..=12.0).step_by(0.5))
+                .on_hover_text(t(
+                    lang,
+                    "Longueur de chaque lien : même espacement sur les trois axes.",
+                    "Length of every link: the same spacing along the three axes.",
+                ));
             ui.end_row();
 
             row(ui, th, t(lang, "Mouvement réduit", "Reduced motion"));

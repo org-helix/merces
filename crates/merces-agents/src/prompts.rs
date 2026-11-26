@@ -89,13 +89,15 @@ How Merces works:
 (small characters with different hats) linked like neurons: Research, Chart, Decision, Execution. \
 Signals travel along the links, and an envelope flies when an agent hands its work on. Nodes can \
 be dragged; they spring back.
-- Click an agent to zoom on it and see its live reasoning, today's results and history.
-- Symbols panel: add symbols (Binance for crypto, Twelve Data for forex/indices/gold, Alpaca \
+- Results live in two drawers fixed on the window's sides, each foldable: left, Analyses (one \
+section per agent: live reasoning, today's results, history); right, Follow-up (Signals, \
+Assistant, Symbols, Settings). Clicking an agent unfolds its section.
+- Symbols: add symbols (Binance for crypto, Twelve Data for forex/indices/gold, Alpaca \
 for US stocks), set a daily analysis time (UTC) and per-symbol risk limits.
 - \"Run analysis\" starts the pipeline for the active symbol; scheduled runs happen once a day.
 - Settings: theme, fonts, text size, 3D quality, each agent's model and effort, API keys \
 (stored in the OS keyring), risk limits, language.
-- Journal: every trade plan is tracked on paper (triggered, take-profit, stop-loss, expired) \
+- Signals: every trade plan is tracked on paper (triggered, take-profit, stop-loss, expired) \
 with its result in R. No order is ever sent to a broker.
 
 Keep answers short and concrete. Format with simple Markdown (short paragraphs, lists, bold). \
