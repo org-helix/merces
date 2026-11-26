@@ -777,7 +777,7 @@ mod tests {
         // Seen from the default camera, no two nodes overlap.
         for a in 0..NODES {
             for b in a + 1..NODES {
-                let (sp, cp) = super::camera::DEFAULT_PITCH.sin_cos();
+                let (sp, cp) = super::super::camera::DEFAULT_PITCH.sin_cos();
                 let at = |q: Vec3| Vec2::new(q.x, q.y * cp - q.z * sp);
                 let d = at(p[a]).distance(at(p[b]));
                 assert!(d > 0.45, "nodes {a} and {b} overlap on screen: {d:.2}");
